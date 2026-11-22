@@ -1,0 +1,12 @@
+{
+  "config_entries": {
+    "stations": {
+      "label": "Stations",
+      "description": "One station per line: name | stream URL | Radioplayer id, with an optional | logo URL at the end. The Radioplayer id is the country code and the station id, such as 056/5067. The README explains how to find it."
+    }
+  },
+  "manifest": {
+    "name": "Radioplayer",
+    "description": "Radio stations you list, showing the artist, title and cover of what plays now from the public Radioplayer feed."
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "type": "music",
+  "domain": "radioplayer",
+  "stage": "alpha",
+  "name": "Radioplayer",
+  "description": "Radio stations you list, showing the artist, title and cover of what plays now from the public Radioplayer feed.",
+  "codeowners": ["@riqiu"],
+  "provides": ["radio"],
+  "requirements": [],
+  "documentation": "https://github.com/riqiu/ma-radioplayer#readme",
+  "multi_instance": false
+}
