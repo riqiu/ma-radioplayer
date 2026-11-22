@@ -1,12 +1,31 @@
 {
   "config_entries": {
+    "countries": {
+      "label": "Landen",
+      "description": "De landen waarvan de zoekfunctie de Radioplayer-zenders vindt. Een gevonden zender speelt de stream die Radioplayer ervoor opgeeft.",
+      "options": {
+        "040": "Oostenrijk",
+        "056": "België",
+        "124": "Canada",
+        "208": "Denemarken",
+        "246": "Finland",
+        "250": "Frankrijk",
+        "276": "Duitsland",
+        "380": "Italië",
+        "442": "Luxemburg",
+        "578": "Noorwegen",
+        "724": "Spanje",
+        "756": "Zwitserland",
+        "826": "Verenigd Koninkrijk"
+      }
+    },
     "stations": {
-      "label": "Zenders",
-      "description": "Eén zender per regel: naam | stream-URL | Radioplayer-id, met eventueel | logo-URL op het einde. De Radioplayer-id is de landcode en de id van de zender, zoals 056/5067. De README legt uit hoe je die vindt."
+      "label": "Eigen zenders",
+      "description": "Optioneel, voor een zender die de zoekfunctie niet vindt of die een andere stream moet spelen. Eén zender per regel: naam | stream-URL | Radioplayer-id, met eventueel | logo-URL op het einde. De Radioplayer-id is de landcode en de id van de zender, zoals 056/5067. De README legt uit hoe je die vindt."
     }
   },
   "manifest": {
     "name": "Radioplayer",
-    "description": "Radiozenders die je zelf opgeeft, met artiest, titel en hoes van wat nu speelt uit de openbare Radioplayer-feed."
+    "description": "Radiozenders van Radioplayer, gezocht of zelf opgegeven, met artiest, titel en hoes van wat nu speelt uit de openbare Radioplayer-feed."
   }
 }

@@ -2,7 +2,13 @@
 
 from typing import Any
 
+import pytest
 from music_assistant_models.enums import MediaType, ProviderTier, StreamType
+from music_assistant_models.errors import (
+    MediaNotFoundError,
+    ProviderUnavailableError,
+    UnplayableMediaError,
+)
 from music_assistant_models.media_items import Radio
 
 from music_assistant.controllers.streams.constants import (
@@ -18,14 +24,17 @@ STATIONS = [
     "Studio Brussel | https://stream.example/stubru.aac | 056/5001 | https://img.example/s.png",
 ]
 COVER = "https://assets.radioplayer.org/coverArt/96cd3aeaeb3c9b62f0c016f9cfa6c58d.jpg"
+BIG = "https://assets.radioplayer.org/056/0565067/600/600/a.png"
+SMALL = "https://assets.radioplayer.org/056/0565010/86/48/b.png"
 
 
-async def _provider(mass: MusicAssistant) -> MusicProvider:
-    """Add the provider and give it the test stations."""
+async def _provider(mass: MusicAssistant, countries: list[str] | None = None) -> MusicProvider:
+    """Add the provider and give it the test stations; no country, so no search goes out."""
     step = await mass.config.setup_provider(DOMAIN)
     assert step.result is not None
     instance_id = step.result["instance_id"]
-    config = await mass.config.save_provider_config(DOMAIN, {"stations": STATIONS}, instance_id)
+    values: dict[str, Any] = {"stations": STATIONS, "countries": countries or []}
+    config = await mass.config.save_provider_config(DOMAIN, values, instance_id)
     # the server reloads a provider a second after its settings change; do it now
     await mass.load_provider_config(config)
     provider = mass.get_provider(instance_id)
@@ -79,7 +88,7 @@ async def test_now_playing(mass: MusicAssistant) -> None:
         None,
     ]
 
-    async def events(_station: Any) -> dict[str, Any] | None:
+    async def events(*_ids: str) -> dict[str, Any] | None:
         return answers.pop(0)
 
     looked_up: list[str] = []
@@ -108,3 +117,63 @@ async def test_now_playing(mass: MusicAssistant) -> None:
     assert details.stream_metadata.title == "Next Song"
     # a song without a cover from the feed asks the server for one, once
     assert looked_up == ["Next Song"]
+
+
+async def test_radioplayer_stations(mass: MusicAssistant) -> None:
+    """Search finds Radioplayer's stations, which play the stream its directory lists."""
+    provider = await _provider(mass, ["056"])
+    search = {
+        "results": {
+            "1": {
+                "results": {
+                    "1": {"type": "SI", "rpId": "5067", "serviceName": "Willy", "imageUrl": BIG},
+                    "2": {"type": "SI", "rpId": "5010", "serviceName": "De Tijdloze"},
+                }
+            }
+        }
+    }
+    service = {
+        "serviceName": "De Tijdloze",
+        "imageUrl": SMALL,
+        "streams": [{"url": "https://streams.example/tijdloze.aac?source=radioplayer"}],
+    }
+
+    async def fetch(url: str, _params: dict[str, str] | None = None) -> Any:
+        if "/search" in url:
+            return search
+        return service if url.endswith("/be/public/service/5010") else None
+
+    # no network in tests: the answers of Radioplayer are stand-ins
+    provider._fetch = fetch  # type: ignore[attr-defined]  # noqa: SLF001
+
+    result = await provider.search("w", [MediaType.RADIO], limit=10)
+    # Willy is in the settings: it keeps its own entry and is not doubled
+    assert [radio.item_id for radio in result.radio] == ["056-5067", "056-5010"]
+    assert result.radio[0].image is None
+
+    radio = await provider.get_radio("056-5010")
+    assert radio.name == "De Tijdloze"
+    assert radio.image is not None
+    assert radio.image.path == SMALL  # the search has no bigger logo for it
+
+    details = await provider.get_stream_details("056-5010", MediaType.RADIO)
+    assert details.path == "https://streams.example/tijdloze.aac?source=radioplayer"
+    assert details.stream_metadata_update_callback is not None
+
+    with pytest.raises(MediaNotFoundError):
+        await provider.get_radio("056-1")
+    with pytest.raises(MediaNotFoundError):
+        await provider.get_stream_details("999-1", MediaType.RADIO)
+    service["streams"] = []
+    with pytest.raises(UnplayableMediaError):
+        await provider.get_stream_details("056-5010", MediaType.RADIO)
+
+    async def unreachable(_url: str, _params: dict[str, str] | None = None) -> Any:
+        raise ProviderUnavailableError("down")
+
+    # Radioplayer down: the station is not called gone, and a search still answers
+    provider._fetch = unreachable  # type: ignore[attr-defined]  # noqa: SLF001
+    with pytest.raises(ProviderUnavailableError):
+        await provider.get_radio("056-5010")
+    result = await provider.search("other", [MediaType.RADIO])
+    assert result.radio == []

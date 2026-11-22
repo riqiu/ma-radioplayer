@@ -1,12 +1,31 @@
 {
   "config_entries": {
+    "countries": {
+      "label": "Countries",
+      "description": "The countries whose Radioplayer stations the search finds. A station found by search plays from the stream that Radioplayer lists for it.",
+      "options": {
+        "040": "Austria",
+        "056": "Belgium",
+        "124": "Canada",
+        "208": "Denmark",
+        "246": "Finland",
+        "250": "France",
+        "276": "Germany",
+        "380": "Italy",
+        "442": "Luxembourg",
+        "578": "Norway",
+        "724": "Spain",
+        "756": "Switzerland",
+        "826": "United Kingdom"
+      }
+    },
     "stations": {
-      "label": "Stations",
-      "description": "One station per line: name | stream URL | Radioplayer id, with an optional | logo URL at the end. The Radioplayer id is the country code and the station id, such as 056/5067. The README explains how to find it."
+      "label": "Own stations",
+      "description": "Optional, for a station the search doesn't find or that should play another stream. One station per line: name | stream URL | Radioplayer id, with an optional | logo URL at the end. The Radioplayer id is the country code and the station id, such as 056/5067. The README explains how to find it."
     }
   },
   "manifest": {
     "name": "Radioplayer",
-    "description": "Radio stations you list, showing the artist, title and cover of what plays now from the public Radioplayer feed."
+    "description": "Radio stations from Radioplayer, found by search or listed by you, showing the artist, title and cover of what plays now from the public Radioplayer feed."
   }
 }

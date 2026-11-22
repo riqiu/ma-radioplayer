@@ -2,12 +2,18 @@
 
 from typing import Any
 
+import pytest
+
 from radioplayer.helpers import (
     DEFAULT_POLL_SECONDS,
     MAX_POLL_SECONDS,
     MIN_POLL_SECONDS,
     STALE_AFTER_SECONDS,
+    parse_item_id,
+    parse_json,
     parse_now_playing,
+    parse_search,
+    parse_service,
     parse_stations,
     poll_seconds,
     split_stream_title,
@@ -137,3 +143,67 @@ def test_split_stream_title() -> None:
     assert plain is not None
     assert (plain.artist, plain.title) == (None, "Willy -")
     assert split_stream_title("  ") is None
+
+
+# an answer of the search, as JSONP: two groups, the same station in both, and a programme
+SEARCH_JSONP = (
+    'callback({"responseStatus":"SUCCESS","total":3,"results":{'
+    '"1":{"groupID":"DPG","results":{'
+    '"1":{"type":"SI","rpId":"5067","serviceName":"Willy","name":"Willy",'
+    '"imageUrl":"https://assets.radioplayer.org/056/0565067/600/600/a.png"},'
+    '"2":{"type":"OD","rpId":"5067","name":"Willy Class X podcast"}}},'
+    '"2":{"groupID":"Other","results":{'
+    '"1":{"type":"SI","rpId":"5067","serviceName":"Willy","name":"Willy"},'
+    '"2":{"type":"SI","rpId":5010,"serviceName":"","name":"De Tijdloze"},'
+    '"3":{"type":"SI","rpId":"x","serviceName":"Broken"}}}}})'
+)
+SERVICE = {
+    "serviceName": "Willy",
+    "deleted": False,
+    "imageUrl": "https://assets.radioplayer.org/056/0565067/86/48/l45bvtoe.png",
+    "streams": [
+        {"url": "", "format": "aac"},
+        {"url": "https://streams.example/willy/aac?source=radioplayer", "format": "aac"},
+        {"url": "https://streams.example/willy/mp3?source=radioplayer", "format": "mp3"},
+    ],
+}
+
+
+def test_item_id() -> None:
+    """A station id is the country code and the Radioplayer id, with a dash."""
+    assert parse_item_id("056-5067") == ("056", "5067")
+    assert parse_item_id("56-5067") is None
+    assert parse_item_id("056/5067") is None
+
+
+def test_json_and_jsonp() -> None:
+    """Answers come as plain JSON or wrapped in a callback."""
+    assert parse_json(' {"a": 1} ') == {"a": 1}
+    assert parse_json('callback({"a": [1]});') == {"a": [1]}
+    for broken in ("", "callback", "<html>"):
+        with pytest.raises(ValueError):  # noqa: PT011 - any parse error will do
+            parse_json(broken)
+
+
+def test_search() -> None:
+    """The search gives each station once, without programmes or broken entries."""
+    hits = parse_search(parse_json(SEARCH_JSONP), "056")
+    assert hits == [
+        ("056-5067", "Willy", "https://assets.radioplayer.org/056/0565067/600/600/a.png"),
+        ("056-5010", "De Tijdloze", None),
+    ]
+    assert parse_search({"results": []}, "056") == []
+    assert parse_search(None, "056") == []
+
+
+def test_service() -> None:
+    """The directory gives the name, the logo and the first stream as it is."""
+    assert parse_service(SERVICE) == (
+        "Willy",
+        SERVICE["imageUrl"],
+        "https://streams.example/willy/aac?source=radioplayer",
+    )
+    assert parse_service({**SERVICE, "streams": []}) == ("Willy", SERVICE["imageUrl"], None)
+    assert parse_service({**SERVICE, "deleted": True}) is None
+    assert parse_service({"message": "Forbidden"}) is None
+    assert parse_service(None) is None
