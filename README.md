@@ -20,6 +20,13 @@ the programme.
 - **When the feed can't be reached:** the title the stream carries, as for any other radio
   station, until the feed answers again.
 
+## Recently played
+
+Under **Browse > Radioplayer > Recently played**, each station of the settings or of the
+library has a folder with the songs it played last, newest first: the artist, the title and
+the cover, as far back as the feed goes (about half an hour to an hour). The songs are only
+listed; the provider can't play a single song.
+
 ## Install
 
 Install the provider from the

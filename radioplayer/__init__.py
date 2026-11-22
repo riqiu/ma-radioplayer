@@ -54,6 +54,7 @@ from music_assistant.models.music_provider import MusicProvider
 from .helpers import (
     COUNTRIES,
     Station,
+    parse_history,
     parse_item_id,
     parse_json,
     parse_now_playing,
@@ -79,6 +80,7 @@ SUPPORTED_FEATURES = {
 
 CONF_COUNTRIES: Final[str] = "countries"
 CONF_STATIONS: Final[str] = "stations"
+RECENT_FOLDER: Final[str] = "recent"
 DEFAULT_COUNTRIES: Final[list[str]] = ["056"]
 FEED_URL: Final[str] = "https://core-search.radioplayer.cloud/{country}/qp/v4/events"
 SEARCH_URL: Final[str] = "https://core-search.radioplayer.cloud/{country}/qp/v4/search"
@@ -211,13 +213,85 @@ class RadioplayerProvider(MusicProvider):
 
     async def browse(self, path: str) -> Sequence[MediaItemType | ItemMapping | BrowseFolder]:
         """
-        Return the stations of the settings; Radioplayer's stations are found by search.
+        Return the stations of the settings and the songs the stations played last.
 
-        :param path: The path to browse; the stations have no folders.
+        The root has the stations of the settings and a folder Recently played, with a folder
+        per station of the settings or the library, which lists its last songs from the feed.
+        Radioplayer's other stations are found by search.
+
+        :param path: The path to browse, such as ``radioplayer://recent/056-5067``.
         """
+        prefix, _, rest = path.partition("://")
+        parts = [part for part in rest.split("/") if part]
+        recent = f"{prefix}://{RECENT_FOLDER}"
+        if not parts:
+            return [
+                *(
+                    self._radio(station.item_id, station.name, station.logo_url)
+                    for station in self._stations.values()
+                ),
+                BrowseFolder(
+                    item_id=RECENT_FOLDER,
+                    provider=self.instance_id,
+                    path=recent,
+                    name="Recently played",
+                ),
+            ]
+        if parts[0] != RECENT_FOLDER:
+            return []
+        if len(parts) == 1:
+            return [
+                BrowseFolder(
+                    item_id=item_id,
+                    provider=self.instance_id,
+                    path=f"{recent}/{item_id}",
+                    name=name,
+                    image=image,
+                )
+                for item_id, (name, image) in (await self._known_stations()).items()
+            ]
+        return await self._recently_played(parts[1], f"{recent}/{parts[1]}")
+
+    async def _known_stations(self) -> dict[str, tuple[str, MediaItemImage | None]]:
+        """Return the name and logo of the stations of the settings and of the library."""
+        stations = {
+            s.item_id: (s.name, self._radio(s.item_id, s.name, s.logo_url).image)
+            for s in self._stations.values()
+        }
+        async for radio in self.mass.music.radio.iter_library_items(provider=self.instance_id):
+            for mapping in radio.provider_mappings:
+                if mapping.provider_instance == self.instance_id:
+                    stations.setdefault(mapping.item_id, (radio.name, radio.image))
+        return stations
+
+    async def _recently_played(self, item_id: str, path: str) -> list[BrowseFolder]:
+        """
+        Return the songs a station played last, newest first, from its feed.
+
+        The songs are folders, not tracks: the provider can't play a single song.
+
+        :param item_id: The id of the station.
+        :param path: The path of the folder of the station; a song leads back to it.
+        """
+        ids = parse_item_id(item_id)
+        events = await self._events(*ids) if ids else None
         return [
-            self._radio(station.item_id, station.name, station.logo_url)
-            for station in self._stations.values()
+            BrowseFolder(
+                # the start time keeps the id of a song the same while newer songs arrive
+                item_id=f"{item_id}-{start}",
+                provider=self.instance_id,
+                path=path,
+                name=f"{artist} - {title}" if artist else title,
+                image=MediaItemImage(
+                    type=ImageType.THUMB,
+                    path=image,
+                    provider=self.instance_id,
+                    remotely_accessible=True,
+                )
+                if image
+                else None,
+            )
+            for start, artist, title, image in parse_history(events)
         ]
 
     async def get_stream_details(self, item_id: str, media_type: MediaType) -> StreamDetails:

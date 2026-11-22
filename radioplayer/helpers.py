@@ -191,6 +191,30 @@ def parse_now_playing(events: dict[str, Any], now: float) -> StreamMetadata | No
     return StreamMetadata(title=title or station_title, image_url=logo)
 
 
+def parse_history(events: Any) -> list[tuple[str, str | None, str, str | None]]:
+    """
+    Return the songs a station played before the current one, newest first, each once.
+
+    Each song is its start time as the feed gives it, its artist (None when the feed has
+    none), its title and its picture as the feed gives it: the cover, or else the logo.
+
+    :param events: The answer of the events feed, whose ``previous`` lists the songs oldest
+        first and often twice.
+    """
+    results = events.get("results") if isinstance(events, dict) else None
+    previous = results.get("previous") if isinstance(results, dict) else None
+    songs: dict[tuple[str, str, str], tuple[str, str | None, str, str | None]] = {}
+    for item in reversed(list(_values(previous))):
+        if not isinstance(item, dict) or item.get("song") is not True:
+            continue
+        title, artist = _text(item.get("name")), _text(item.get("artistName"))
+        if title:
+            start = _text(item.get("startTime"))
+            image = _text(item.get("imageUrl")) or None
+            songs.setdefault((start, artist, title), (start, artist or None, title, image))
+    return list(songs.values())
+
+
 def poll_seconds(events: dict[str, Any]) -> float:
     """
     Return how long to wait before asking the feed again, within sane bounds.

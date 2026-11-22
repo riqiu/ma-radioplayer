@@ -9,7 +9,7 @@ from music_assistant_models.errors import (
     ProviderUnavailableError,
     UnplayableMediaError,
 )
-from music_assistant_models.media_items import Radio
+from music_assistant_models.media_items import BrowseFolder, Radio
 
 from music_assistant.controllers.streams.constants import (
     STREAMDETAILS_INBAND_TITLE_HANDOFF_KEY,
@@ -117,6 +117,47 @@ async def test_now_playing(mass: MusicAssistant) -> None:
     assert details.stream_metadata.title == "Next Song"
     # a song without a cover from the feed asks the server for one, once
     assert looked_up == ["Next Song"]
+
+
+async def test_recently_played(mass: MusicAssistant) -> None:
+    """Browse has the stations and a folder per station with the songs it played last."""
+    provider = await _provider(mass)
+    feed = {
+        "results": {
+            "previous": [
+                {"name": "Old Song", "artistName": "OLD", "song": True, "startTime": "1"},
+                {"name": "Arme Joe", "artistName": "NOORDKAAP", "song": True, "imageUrl": COVER},
+            ]
+        }
+    }
+    asked: list[tuple[str, ...]] = []
+
+    async def events(*ids: str) -> dict[str, Any]:
+        asked.append(ids)
+        return feed
+
+    # no network in tests: the feed is a stand-in
+    provider._events = events  # type: ignore[attr-defined]  # noqa: SLF001
+
+    root = await provider.browse(f"{provider.instance_id}://")
+    assert [item.name for item in root] == ["Willy", "Studio Brussel", "Recently played"]
+    recent = root[-1]
+    assert isinstance(recent, BrowseFolder)
+
+    stations = await provider.browse(recent.path)
+    assert [item.name for item in stations] == ["Willy", "Studio Brussel"]
+    willy = stations[0]
+    assert isinstance(willy, BrowseFolder)
+    assert willy.path == f"{provider.instance_id}://recent/056-5067"
+
+    songs = await provider.browse(willy.path)
+    assert [song.name for song in songs] == ["NOORDKAAP - Arme Joe", "OLD - Old Song"]
+    assert all(isinstance(song, BrowseFolder) and not song.is_playable for song in songs)
+    assert songs[0].image is not None
+    assert songs[0].image.path == COVER
+    assert songs[1].item_id == "056-5067-1"
+    assert asked == [("056", "5067")]
+    assert await provider.browse(f"{provider.instance_id}://recent/bad") == []
 
 
 async def test_radioplayer_stations(mass: MusicAssistant) -> None:

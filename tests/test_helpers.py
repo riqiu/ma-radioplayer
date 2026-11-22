@@ -9,6 +9,7 @@ from radioplayer.helpers import (
     MAX_POLL_SECONDS,
     MIN_POLL_SECONDS,
     STALE_AFTER_SECONDS,
+    parse_history,
     parse_item_id,
     parse_json,
     parse_now_playing,
@@ -95,6 +96,19 @@ def test_feed_without_now() -> None:
     assert parse_now_playing({"results": []}, START) is None
     assert parse_now_playing({}, START) is None
     assert parse_now_playing(_events({**_song(), "stopTime": "soon"}), START) is not None
+
+
+def test_history() -> None:
+    """The songs before the current one come newest first, each once, without the breaks."""
+    first = {**_song(), "startTime": "1", "name": "Old Song", "artistName": ""}
+    events = _events(_song())
+    events["results"]["previous"] = [first, BETWEEN_SONGS, _song(LOGO), _song(LOGO), "broken"]
+    assert parse_history(events) == [
+        (str(START), "NOORDKAAP", "Arme Joe", LOGO),
+        ("1", None, "Old Song", COVER),
+    ]
+    assert parse_history(_events(None)) == []
+    assert parse_history(None) == []
 
 
 def test_poll_seconds() -> None:
