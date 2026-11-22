@@ -1,5 +1,5 @@
 [project]
-name = "community-provider-template"
+name = "radioplayer"
 version = "0.0.0"
 description = "A community provider for Music Assistant"
 license = "Apache-2.0"

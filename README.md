@@ -1,116 +1,117 @@
-# Music Assistant community provider template
+# Radioplayer for Music Assistant
 
-A community provider adds something to [Music Assistant](https://music-assistant.io) from a
-repository of its own, with its own documentation, support and releases. An administrator of a
-Music Assistant server installs it from the
-[community catalog](https://github.com/music-assistant/community-catalog).
+A [Music Assistant](https://music-assistant.io) community provider for radio stations that
+show what really plays. For each station you list, it asks the public
+[Radioplayer](https://radioplayer.org) feed for the artist, the title and the cover of the
+song on air.
 
-This template holds a working music source, `example_music`, that plays a few test tones without
-an account or network, with its tests, a development container and CI.
+Most radio streams carry a title of their own, but many stations leave the last song in it
+during the adverts, the news and the talk, or only send the station name. Radioplayer is the
+listings service that many European broadcasters use for their own apps, so its feed follows
+the programme.
 
-## The rules
+## What you see
 
-A registry maintainer accepts a provider once, for what it does. A provider may do what the
-service's own app does for the user's account, reverse engineering included, but never more. The
-[community catalog rules](https://github.com/music-assistant/.github/blob/main/COMMUNITY_CATALOG_RULES.md)
-say exactly what is and is not accepted.
+- **During a song:** the artist, the title and the cover from Radioplayer. When the feed only
+  has the station logo for that song, Music Assistant looks for a cover itself, as it does for
+  other radio stations.
+- **Between songs** (adverts, news, talk): the name of the programme or the station, with its
+  logo, and no artist.
+- **When the feed can't be reached:** the title the stream carries, as for any other radio
+  station, until the feed answers again.
 
-A provider that talks to a music service is a good client of it: a throttler in front of its API,
-the cache for what repeats, no new requests while the service asks to wait, and no walking of the
-service's catalogue for one user action. The
-[developer guide of the server](https://github.com/music-assistant/server/blob/dev/DEVELOPMENT.md)
-explains this with the helpers that do it.
+## Install
 
-## From template to a listed provider
+Install the provider from the
+[community catalog](https://github.com/music-assistant/community-catalog) in the settings of
+your Music Assistant server, then add it under **Settings > Providers**.
 
-You need [Docker](https://www.docker.com/products/docker-desktop/) and
-[VS Code](https://code.visualstudio.com/) with the Dev Containers extension, on Windows, macOS or
-Linux.
+## Set up the stations
 
-1. **Use the template.** Click **Use this template**, create your repository and open it in
-   VS Code. Choose **Reopen in Container**; the first build downloads the server and takes a few
-   minutes.
-2. **Name your provider.** Its `domain` is the unique id of the provider in `manifest.json`, such
-   as `my_service`; it is not a domain name. It holds lower case letters, digits and underscores,
-   and no other provider may use it. In the terminal of VS Code:
+The provider has one setting, **Stations**: one station per line, in the form
 
-   ```sh
-   uv run python scripts/rename.py my_service
-   uv lock
-   ```
+```text
+name | stream URL | Radioplayer id
+```
 
-   The script renames the folder and sets the domain in the manifest, the tests, the CI and
-   `pyproject.toml`. Then delete `scripts/rename.py`; it belongs to the template.
-   The provider may also be in a folder named `provider`, or in `providers/my_service` in a
-   repository with several providers; set `folder` in `.github/workflows/ci.yml` to that folder.
-3. **Write it.** In `manifest.json` and `strings.json`, set the name, the description, your GitHub
-   handle in `codeowners` and the address of your documentation. List in `provides` what the
-   provider offers whatever its settings or the user's account: media types such as `track` or
-   `radio`, or for a plugin its main features such as `audio_source` or `scrobble`. It is for
-   discovery only, such as the filters of the Marketplace; what the provider does always comes
-   from its code. The
-   [developer documentation](https://developers.music-assistant.io/building-a-provider/) explains
-   how to build a provider.
+with an optional logo URL at the end:
 
-   | Path | What it is |
-   |---|---|
-   | `my_service/__init__.py` | The provider. Its comments show where the real work goes. |
-   | `my_service/manifest.json` | Its type, domain, name, code owners and requirements ([all fields](https://github.com/music-assistant/server/blob/dev/DEVELOPMENT.md#%EF%B8%8F-manifest-file)). |
-   | `my_service/strings.json` | Its texts in English: the name, the description and the labels of its settings. |
-   | `my_service/translations/` | Its texts in other languages the server has, such as `nl.json`. |
-   | `my_service/icon.svg` | Its icon. Optional, as are `icon_dark.svg` and `icon_monochrome.svg`. |
+```text
+Willy | https://example.com/willy.mp3 | 056/5067
+Studio Brussel | https://example.com/stubru.aac | 056/5001 | https://example.com/stubru.png
+```
 
-   The server's annotated templates (`_demo_music_provider`, `_demo_player_provider` and
-   `_demo_plugin_provider` in
-   [`music_assistant/providers`](https://github.com/music-assistant/server/tree/dev/music_assistant/providers))
-   list every method you can implement. A provider that asks the user for a login or another value
-   adds a [setup flow](https://developers.music-assistant.io/setup-flows/). The provider runs inside
-   the user's server: it never blocks and never writes into its own folder, and its requirements
-   install next to the server's packages, so use the versions the server already has where you can.
-4. **Run it.** Run the task **Run Music Assistant** (Terminal > Run Task) or `scripts/run.sh`, or
-   press F5 to run it in the debugger. Open <http://localhost:8095>, create the first user, add
-   your provider under Settings > Music sources and play a track in the web player; speakers in
-   your network usually cannot reach a server inside the container. When the provider is not
-   offered there, the output of the server says why; when it fails to start, its entry in the
-   settings shows the error. Restart the server after a change to the code; delete `.data/` to
-   start over with an empty server. Without the container, on macOS or Linux with
-   [uv](https://docs.astral.sh/uv/) and ffmpeg 8 or newer: `uv sync`, then `scripts/run.sh`.
-5. **Test it.** `uv run pytest` checks the manifest, the texts, the requirements and the icon, and
-   boots a real server that loads the provider and asks it for a track. For your own tests,
-   `pytest_plugins = ["music_assistant.testing"]` in `tests/conftest.py` gives the fixture `mass`:
-   a started server that loads your repository, announces nothing on the network and listens only
-   on the local machine. What your provider asks of its service still goes out. Lint, type check
-   and spelling run on every commit once `uv run pre-commit install` has run (the container does
-   that). CI runs all of this and the checks the community catalog runs on every release. A check
-   that fails says exactly what is wrong;
-   [What a provider needs](https://github.com/music-assistant/community-catalog/blob/main/MAINTAINING.md#what-a-provider-needs)
-   lists the exact limits.
-6. **Publish a release:** a GitHub release, not a pre-release, whose tag is the version, such as
-   `v1.2.0`.
-7. **Submit it** with the form
-   [Submit a provider](https://github.com/music-assistant/community-catalog/issues/new?template=submit-provider.yml).
-   It needs a public repository with an open source licence and a release that passes the checks.
-   The owner of the repository or a code owner in the manifest of its latest release submits it.
-   The result of the checks appears as a comment on the issue; a registry maintainer then decides
-   once about what the provider does. The
-   [registry's README](https://github.com/music-assistant/community-catalog#admission) has the
-   details.
+- **name:** the name to show in Music Assistant.
+- **stream URL:** the audio stream of the station, as you would add it as a radio station.
+  The provider doesn't look streams up, so use the one you already play.
+- **Radioplayer id:** the country code, a slash and the id of the station on Radioplayer (see
+  below).
+- **logo URL** (optional): the picture of the station in the library.
 
-After admission, you release whenever you want: publish a GitHub release, and nothing else is
-needed. The registry looks for new releases once a night and offers each version to the channels
-it passes on: nightly, beta, and one per stable version such as stable 2.11. When a release fails,
-or a version stops loading on a channel, the registry opens an issue on its own repository that
-mentions you with the reason, and closes it by itself when a later release passes.
-[What the nightly test reports](https://developers.music-assistant.io/building-a-provider/#what-the-nightly-test-reports)
-has the details.
+The stations appear in the library under **Radio**. A line that can't be read is skipped and
+named in the log of the server. Two lines with the same Radioplayer id are not allowed, as
+the id is the identity of the station in Music Assistant: changing it makes a new station,
+and favourites or presets of the old one stop working.
 
-## The server version
+### Find the Radioplayer id
 
-The server version you develop against is the `music-assistant` line in `pyproject.toml`: a release
-tag or a commit of the server after the `@`. To move to another, change that line and run
-`uv lock`. Keep the two packages listed under it at the versions in the server's
-`music_assistant/providers/sendspin/manifest.json`.
+The country code is the
+[ISO 3166-1 numeric code](https://en.wikipedia.org/wiki/ISO_3166-1_numeric) of the country,
+with three digits: `056` for Belgium, `826` for the United Kingdom, `276` for Germany, and so
+on. Radioplayer runs in a number of European countries only.
+
+The station id is in the search of the feed. Open, for a station named Willy in Belgium:
+
+```text
+https://core-search.radioplayer.cloud/056/qp/v4/search?query=willy
+```
+
+and take the `rpId` of the station in the answer, here `5067`, which gives `056/5067`. The
+answer also has the `imageUrl` of the logo, which you can use as the logo URL.
+
+To check an id, open the feed of what plays now; it should name the station:
+
+```text
+https://core-search.radioplayer.cloud/056/qp/v4/events?rpId=5067
+```
+
+## How it works
+
+While a station plays, Music Assistant asks the provider every few seconds what plays. The
+provider asks the feed of that station at most as often as the feed says it may (its
+`pollNext`, kept between 10 seconds and 5 minutes) and shares the answer between all players
+on that station. After a failed request it waits a minute before it asks again. It sends no
+account, key or personal data: only the id of the station.
+
+The provider tells Music Assistant to keep the title of the stream aside instead of showing
+it, and uses that title only while the feed fails.
+
+## Limits
+
+- Only stations on Radioplayer, in a country where it runs, show what plays from the feed.
+- The feed is the one the Radioplayer web player uses. It is public and needs no key, but it
+  has no documentation or promise of stability; if it changes, the stations still play and
+  show the title of the stream.
+- The feed and the audio are not in exact sync: a new song can show some seconds early or
+  late.
+
+## Development
+
+The repository follows the
+[community provider template](https://github.com/music-assistant/community-provider-template).
+With [uv](https://docs.astral.sh/uv/) and Python 3.14:
+
+```shell
+uv sync
+uv run pytest
+uv run ruff check . && uv run ruff format --check .
+uv run mypy radioplayer tests
+```
+
+The parsing of the settings and of the feed is in `radioplayer/helpers.py`, apart from the
+server, with its tests in `tests/test_helpers.py`.
 
 ## Licence
 
-Apache-2.0, like Music Assistant. You may choose another open source licence for your provider.
+[Apache License 2.0](LICENSE). Radioplayer is a trademark of its owners; this project is not
+made or endorsed by them.

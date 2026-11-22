@@ -1,0 +1,12 @@
+{
+  "config_entries": {
+    "stations": {
+      "label": "Zenders",
+      "description": "Eén zender per regel: naam | stream-URL | Radioplayer-id, met eventueel | logo-URL op het einde. De Radioplayer-id is de landcode en de id van de zender, zoals 056/5067. De README legt uit hoe je die vindt."
+    }
+  },
+  "manifest": {
+    "name": "Radioplayer",
+    "description": "Radiozenders die je zelf opgeeft, met artiest, titel en hoes van wat nu speelt uit de openbare Radioplayer-feed."
+  }
+}
