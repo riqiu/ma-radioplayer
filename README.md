@@ -1,9 +1,9 @@
 # Radioplayer for Music Assistant
 
 A [Music Assistant](https://music-assistant.io) community provider for radio stations that
-show what really plays. For each station you list, it asks the public
-[Radioplayer](https://radioplayer.org) feed for the artist, the title and the cover of the
-song on air.
+show what really plays. It finds the stations of [Radioplayer](https://radioplayer.org) by
+search, plays them from the streams Radioplayer itself lists, and asks the public Radioplayer
+feed for the artist, the title and the cover of the song on air.
 
 Most radio streams carry a title of their own, but many stations leave the last song in it
 during the adverts, the news and the talk, or only send the station name. Radioplayer is the
@@ -26,9 +26,22 @@ Install the provider from the
 [community catalog](https://github.com/music-assistant/community-catalog) in the settings of
 your Music Assistant server, then add it under **Settings > Providers**.
 
-## Set up the stations
+## Find stations
 
-The provider has one setting, **Stations**: one station per line, in the form
+Pick one or more **Countries** in the settings of the provider (Belgium by default). The
+search of Music Assistant then finds the Radioplayer stations of those countries under
+**Radio**; add the ones you want to your library. Radioplayer gives the search on these
+countries: Austria, Belgium, Canada, Denmark, Finland, France, Germany, Italy, Luxembourg,
+Norway, Spain, Switzerland and the United Kingdom.
+
+A station found by search plays the first stream that Radioplayer lists for it, asked again
+at every start. The address is used as given, with the parameters by which the station counts
+its listeners.
+
+## Own stations
+
+Optional: the setting **Own stations** is for a station the search doesn't find, such as one
+in another country, or one that should play another stream. One station per line, in the form
 
 ```text
 name | stream URL | Radioplayer id
@@ -48,10 +61,12 @@ Studio Brussel | https://example.com/stubru.aac | 056/5001 | https://example.com
   below).
 - **logo URL** (optional): the picture of the station in the library.
 
-The stations appear in the library under **Radio**. A line that can't be read is skipped and
-named in the log of the server. Two lines with the same Radioplayer id are not allowed, as
+These stations appear in the library under **Radio**. A line that can't be read is skipped
+and named in the log of the server. Two lines with the same Radioplayer id are not allowed, as
 the id is the identity of the station in Music Assistant: changing it makes a new station,
-and favourites or presets of the old one stop working.
+and favourites or presets of the old one stop working. A station found by search has the same
+id, so a line for it replaces the station's name, stream and logo while favourites and presets
+keep working.
 
 ### Find the Radioplayer id
 
@@ -81,7 +96,10 @@ While a station plays, Music Assistant asks the provider every few seconds what 
 provider asks the feed of that station at most as often as the feed says it may (its
 `pollNext`, kept between 10 seconds and 5 minutes) and shares the answer between all players
 on that station. After a failed request it waits a minute before it asks again. It sends no
-account, key or personal data: only the id of the station.
+account, key or personal data: only the id of the station, or the text searched for.
+
+A search asks each picked country once and keeps the answer for a day. Starting a station
+found by search asks Radioplayer's station directory for its streams.
 
 The provider tells Music Assistant to keep the title of the stream aside instead of showing
 it, and uses that title only while the feed fails.
@@ -89,9 +107,11 @@ it, and uses that title only while the feed fails.
 ## Limits
 
 - Only stations on Radioplayer, in a country where it runs, show what plays from the feed.
-- The feed is the one the Radioplayer web player uses. It is public and needs no key, but it
-  has no documentation or promise of stability; if it changes, the stations still play and
-  show the title of the stream.
+- The feed, the search and the station directory are the public, unofficial API of the
+  Radioplayer web player. They need no key, but have no documentation or promise of
+  stability; this project is not affiliated with Radioplayer and may break when they change.
+  If the feed changes, the stations still play and show the title of the stream; if the
+  directory changes, only own stations play.
 - The feed and the audio are not in exact sync: a new song can show some seconds early or
   late.
 
@@ -108,7 +128,7 @@ uv run ruff check . && uv run ruff format --check .
 uv run mypy radioplayer tests
 ```
 
-The parsing of the settings and of the feed is in `radioplayer/helpers.py`, apart from the
+The parsing of the settings and of the Radioplayer answers is in `radioplayer/helpers.py`, apart from the
 server, with its tests in `tests/test_helpers.py`.
 
 ## Licence

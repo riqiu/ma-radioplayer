@@ -1,10 +1,12 @@
 """
 Radioplayer for Music Assistant: radio stations that show what really plays.
 
-The user lists the stations, each with its stream and its Radioplayer id. While a station
-plays, the provider asks the public Radioplayer feed what plays now and shows its artist,
-title and cover. The title in the stream itself is only used while the feed can't be
-reached, as many stations leave the last song in it during adverts and talk.
+The stations come from the Radioplayer search of the countries the user picks, played from
+the streams in Radioplayer's own station directory, or from the stations the user lists,
+each with its stream and its Radioplayer id. While a station plays, the provider asks the
+public Radioplayer feed what plays now and shows its artist, title and cover. The title in
+the stream itself is only used while the feed can't be reached, as many stations leave the
+last song in it during adverts and talk.
 """
 
 from __future__ import annotations
@@ -15,7 +17,7 @@ from collections.abc import AsyncGenerator, Sequence
 from typing import TYPE_CHECKING, Any, Final, cast
 
 import aiohttp
-from music_assistant_models.config_entries import ConfigEntry
+from music_assistant_models.config_entries import ConfigEntry, ConfigValueOption
 from music_assistant_models.enums import (
     ConfigEntryType,
     ContentType,
@@ -24,7 +26,11 @@ from music_assistant_models.enums import (
     ProviderFeature,
     StreamType,
 )
-from music_assistant_models.errors import MediaNotFoundError, UnplayableMediaError
+from music_assistant_models.errors import (
+    MediaNotFoundError,
+    ProviderUnavailableError,
+    UnplayableMediaError,
+)
 from music_assistant_models.media_items import (
     AudioFormat,
     BrowseFolder,
@@ -37,6 +43,7 @@ from music_assistant_models.media_items import (
 )
 from music_assistant_models.streamdetails import StreamDetails, StreamMetadata
 
+from music_assistant.controllers.cache import use_cache
 from music_assistant.controllers.streams.constants import (
     STREAMDETAILS_INBAND_TITLE_HANDOFF_KEY,
     STREAMDETAILS_INBAND_TITLE_KEY,
@@ -44,7 +51,18 @@ from music_assistant.controllers.streams.constants import (
 from music_assistant.helpers.throttle_retry import Throttler
 from music_assistant.models.music_provider import MusicProvider
 
-from .helpers import Station, parse_now_playing, parse_stations, poll_seconds, split_stream_title
+from .helpers import (
+    COUNTRIES,
+    Station,
+    parse_item_id,
+    parse_json,
+    parse_now_playing,
+    parse_search,
+    parse_service,
+    parse_stations,
+    poll_seconds,
+    split_stream_title,
+)
 
 if TYPE_CHECKING:
     from music_assistant_models.config_entries import ProviderConfig
@@ -59,9 +77,15 @@ SUPPORTED_FEATURES = {
     ProviderFeature.LIBRARY_RADIOS,
 }
 
+CONF_COUNTRIES: Final[str] = "countries"
 CONF_STATIONS: Final[str] = "stations"
+DEFAULT_COUNTRIES: Final[list[str]] = ["056"]
 FEED_URL: Final[str] = "https://core-search.radioplayer.cloud/{country}/qp/v4/events"
-FEED_TIMEOUT: Final[aiohttp.ClientTimeout] = aiohttp.ClientTimeout(total=10)
+SEARCH_URL: Final[str] = "https://core-search.radioplayer.cloud/{country}/qp/v4/search"
+SERVICE_URL: Final[str] = "https://mapi.radioplayer.cloud/api/{directory}/public/service/{rp_id}"
+REQUEST_TIMEOUT: Final[aiohttp.ClientTimeout] = aiohttp.ClientTimeout(total=10)
+# the stations of a country change seldom; a failed search is not kept
+SEARCH_CACHE_SECONDS: Final[int] = 24 * 3600
 # how long to leave the feed of a station alone after it failed
 FEED_RETRY_SECONDS: Final[int] = 60
 # how often the server asks the provider what plays; the feed itself is asked at most
@@ -77,8 +101,9 @@ async def setup(
 
 
 class RadioplayerProvider(MusicProvider):
-    """Radio stations from the settings, with what plays from the Radioplayer feed."""
+    """Radio stations from Radioplayer and the settings, with what plays from its feed."""
 
+    _countries: list[str]
     _stations: dict[str, Station]
     _throttler: Throttler
     # per station: until when the last answer of the feed holds, and that answer
@@ -87,8 +112,19 @@ class RadioplayerProvider(MusicProvider):
     _feed_locks: dict[str, asyncio.Lock]
 
     async def get_config_entries(self) -> tuple[ConfigEntry, ...]:
-        """Return the settings of the provider: the list of stations."""
+        """Return the settings of the provider: the countries to search and own stations."""
         return (
+            ConfigEntry(
+                key=CONF_COUNTRIES,
+                type=ConfigEntryType.STRING,
+                multi_value=True,
+                options=[
+                    ConfigValueOption(title=title, value=code)
+                    for code, (_directory, title) in COUNTRIES.items()
+                ],
+                default_value=DEFAULT_COUNTRIES,
+                required=False,
+            ),
             ConfigEntry(
                 key=CONF_STATIONS,
                 type=ConfigEntryType.STRING,
@@ -99,19 +135,17 @@ class RadioplayerProvider(MusicProvider):
         )
 
     async def handle_async_init(self) -> None:
-        """Read the stations from the settings."""
+        """Read the countries and the stations from the settings."""
+        countries = cast("list[str]", self.config.get_value(CONF_COUNTRIES) or [])
+        self._countries = [str(code) for code in countries if str(code) in COUNTRIES]
         lines = cast("list[str]", self.config.get_value(CONF_STATIONS) or [])
         self._stations, errors = parse_stations([str(line) for line in lines])
         for error in errors:
             self.logger.warning("Skipped a station: %s", error)
-        self._throttler = Throttler(rate_limit=1, period=1)
+        # one search asks each country of the settings
+        self._throttler = Throttler(rate_limit=5, period=1)
         self._feeds = {}
         self._feed_locks = {}
-
-    @property
-    def is_streaming_provider(self) -> bool:
-        """Return False: the library holds every station this provider offers."""
-        return False
 
     @property
     def max_concurrent_streams(self) -> None:
@@ -119,9 +153,9 @@ class RadioplayerProvider(MusicProvider):
         return None
 
     async def get_library_radios(self) -> AsyncGenerator[Radio]:
-        """Return the stations of the settings."""
+        """Return the stations of the settings; stations found by search are added by the user."""
         for station in self._stations.values():
-            yield self._radio(station)
+            yield self._radio(station.item_id, station.name, station.logo_url)
 
     async def get_radio(self, prov_radio_id: str) -> Radio:
         """
@@ -129,33 +163,62 @@ class RadioplayerProvider(MusicProvider):
 
         :param prov_radio_id: The id of the station.
         """
-        return self._radio(self._station(prov_radio_id))
+        if station := self._stations.get(prov_radio_id):
+            return self._radio(station.item_id, station.name, station.logo_url)
+        country, rp_id = _catalog_id(prov_radio_id)
+        details = parse_service(await self._service(country, rp_id))
+        if details is None:
+            raise MediaNotFoundError(f"Unknown station: {prov_radio_id}")
+        name, logo_url, _stream = details
+        # the directory has a small logo; the search has the same station at 600x600
+        for item_id, _name, big_logo in parse_search(
+            await self._search_country(country, name.lower()), country
+        ):
+            if item_id == prov_radio_id and big_logo:
+                logo_url = big_logo
+                break
+        return self._radio(prov_radio_id, name, logo_url)
 
     async def search(
         self, search_query: str, media_types: list[MediaType], limit: int = 5
     ) -> SearchResults:
         """
-        Return the stations whose name holds the search query.
+        Return the stations of the settings and of Radioplayer that match the search query.
 
         :param search_query: The text to find in the station names.
         :param media_types: The media types to search for.
         :param limit: The maximum number of stations to return.
         """
         result = SearchResults()
-        query = search_query.lower().strip()
+        query = search_query.strip()
         if MediaType.RADIO not in media_types or not query:
             return result
-        matches = [s for s in self._stations.values() if query in s.name.lower()]
-        result.radio = [self._radio(station) for station in matches[:limit]]
+        found = {
+            station.item_id: (station.item_id, station.name, station.logo_url)
+            for station in self._stations.values()
+            if query.lower() in station.name.lower()
+        }
+        for country in self._countries:
+            if len(found) >= limit:
+                break
+            answer = await self._search_country(country, query.lower())
+            for hit in parse_search(answer, country):
+                # a station of the settings keeps its own name, stream and logo
+                if hit[0] not in self._stations:
+                    found.setdefault(hit[0], hit)
+        result.radio = [self._radio(*hit) for hit in list(found.values())[:limit]]
         return result
 
     async def browse(self, path: str) -> Sequence[MediaItemType | ItemMapping | BrowseFolder]:
         """
-        Return all stations.
+        Return the stations of the settings; Radioplayer's stations are found by search.
 
         :param path: The path to browse; the stations have no folders.
         """
-        return [self._radio(station) for station in self._stations.values()]
+        return [
+            self._radio(station.item_id, station.name, station.logo_url)
+            for station in self._stations.values()
+        ]
 
     async def get_stream_details(self, item_id: str, media_type: MediaType) -> StreamDetails:
         """
@@ -166,14 +229,21 @@ class RadioplayerProvider(MusicProvider):
         """
         if media_type != MediaType.RADIO:
             raise UnplayableMediaError(f"Unsupported media type: {media_type}")
-        station = self._station(item_id)
+        if station := self._stations.get(item_id):
+            path = station.stream_url
+        else:
+            # asked at every start: the stream addresses carry parameters that may change
+            details = parse_service(await self._service(*_catalog_id(item_id)))
+            if details is None or details[2] is None:
+                raise UnplayableMediaError(f"Radioplayer has no stream for station {item_id}")
+            path = details[2]
         return StreamDetails(
             provider=self.instance_id,
             item_id=item_id,
             audio_format=AudioFormat(content_type=ContentType.UNKNOWN),
             media_type=MediaType.RADIO,
             stream_type=StreamType.HTTP,
-            path=station.stream_url,
+            path=path,
             allow_seek=False,
             can_seek=False,
             duration=0,
@@ -187,10 +257,10 @@ class RadioplayerProvider(MusicProvider):
         self, streamdetails: StreamDetails, elapsed_time: int
     ) -> None:
         """Show what plays on a station."""
-        station = self._stations.get(streamdetails.item_id)
-        if station is None:
+        ids = parse_item_id(streamdetails.item_id)
+        if ids is None:
             return
-        events = await self._events(station)
+        events = await self._events(*ids)
         if events is None:
             # the feed can't be reached: the title in the stream is all there is
             data = streamdetails.data or {}
@@ -207,64 +277,94 @@ class RadioplayerProvider(MusicProvider):
         if metadata and metadata.artist and not metadata.image_url:
             await self.mass.metadata.update_radio_stream_artwork(streamdetails)
 
-    async def _events(self, station: Station) -> dict[str, Any] | None:
+    async def _events(self, country: str, rp_id: str) -> dict[str, Any] | None:
         """Return the last answer of the feed for a station, asking again once it is due."""
-        lock = self._feed_locks.setdefault(station.item_id, asyncio.Lock())
+        key = f"{country}-{rp_id}"
+        lock = self._feed_locks.setdefault(key, asyncio.Lock())
         async with lock:
-            due, events = self._feeds.get(station.item_id, (0.0, None))
+            due, events = self._feeds.get(key, (0.0, None))
             if time.monotonic() < due:
                 return events
-            answer: Any = None
             try:
-                async with (
-                    self._throttler,
-                    self.mass.http_session.get(
-                        FEED_URL.format(country=station.country),
-                        params={"rpId": station.rp_id},
-                        timeout=FEED_TIMEOUT,
-                    ) as response,
-                ):
-                    response.raise_for_status()
-                    answer = await response.json(content_type=None)
-            except (aiohttp.ClientError, TimeoutError, ValueError) as err:
-                self.logger.debug("Radioplayer feed of %s failed: %s", station.name, err)
+                answer = await self._fetch(FEED_URL.format(country=country), {"rpId": rp_id})
+            except ProviderUnavailableError:
+                answer = None
             if not isinstance(answer, dict):
-                self._feeds[station.item_id] = (time.monotonic() + FEED_RETRY_SECONDS, None)
+                self._feeds[key] = (time.monotonic() + FEED_RETRY_SECONDS, None)
                 return None
-            self._feeds[station.item_id] = (time.monotonic() + poll_seconds(answer), answer)
+            self._feeds[key] = (time.monotonic() + poll_seconds(answer), answer)
             return answer
 
-    def _station(self, item_id: str) -> Station:
-        """Return a station of the settings, or raise when there is none with this id."""
-        station = self._stations.get(item_id)
-        if station is None:
-            raise MediaNotFoundError(f"Unknown station: {item_id}")
-        return station
+    @use_cache(SEARCH_CACHE_SECONDS, cache_none=False)
+    async def _search_country(self, country: str, query: str) -> Any:
+        """Return the answer of the Radioplayer search in one country, or None when it fails."""
+        try:
+            answer = await self._fetch(SEARCH_URL.format(country=country), {"query": query})
+        except ProviderUnavailableError:
+            return None
+        # only a real answer is kept for a day, never an error that came with a 200
+        if isinstance(answer, dict) and isinstance(answer.get("results"), dict | list):
+            return answer
+        return None
 
-    def _radio(self, station: Station) -> Radio:
+    async def _service(self, country: str, rp_id: str) -> Any:
+        """Return the entry of a station in the directory, or None when it fails."""
+        directory = COUNTRIES[country][0]
+        return await self._fetch(SERVICE_URL.format(directory=directory, rp_id=rp_id))
+
+    async def _fetch(self, url: str, params: dict[str, str] | None = None) -> Any:
+        """
+        Return the content of a Radioplayer answer, or None when Radioplayer refuses it (4xx).
+
+        Raise ProviderUnavailableError when Radioplayer can't be reached or answers nonsense,
+        so a hiccup never reads as a station that is gone.
+        """
+        try:
+            async with (
+                self._throttler,
+                self.mass.http_session.get(url, params=params, timeout=REQUEST_TIMEOUT) as response,
+            ):
+                if 400 <= response.status < 500:
+                    self.logger.debug("Radioplayer refused %s: %s", url, response.status)
+                    return None
+                response.raise_for_status()
+                return parse_json(await response.text())
+        except (aiohttp.ClientError, TimeoutError, ValueError) as err:
+            self.logger.debug("Radioplayer request %s failed: %s", url, err)
+            raise ProviderUnavailableError(f"Radioplayer can't be reached: {err}") from err
+
+    def _radio(self, item_id: str, name: str, logo_url: str | None) -> Radio:
         """Return the radio item of a station."""
         radio = Radio(
-            item_id=station.item_id,
+            item_id=item_id,
             provider=self.instance_id,
-            name=station.name,
+            name=name,
             provider_mappings={
                 ProviderMapping(
-                    item_id=station.item_id,
+                    item_id=item_id,
                     provider_domain=self.domain,
                     provider_instance=self.instance_id,
                 )
             },
         )
-        if station.logo_url:
+        if logo_url:
             radio.metadata.add_image(
                 MediaItemImage(
                     type=ImageType.THUMB,
-                    path=station.logo_url,
+                    path=logo_url,
                     provider=self.instance_id,
                     remotely_accessible=True,
                 )
             )
         return radio
+
+
+def _catalog_id(item_id: str) -> tuple[str, str]:
+    """Return the country code and Radioplayer id of a station outside the settings."""
+    ids = parse_item_id(item_id)
+    if ids is None or ids[0] not in COUNTRIES:
+        raise MediaNotFoundError(f"Unknown station: {item_id}")
+    return ids
 
 
 def _same_item(current: StreamMetadata | None, new: StreamMetadata | None) -> bool:
