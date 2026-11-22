@@ -33,7 +33,7 @@ async def _provider(mass: MusicAssistant, countries: list[str] | None = None) ->
     step = await mass.config.setup_provider(DOMAIN)
     assert step.result is not None
     instance_id = step.result["instance_id"]
-    values = {"stations": STATIONS, "countries": countries or []}
+    values: dict[str, Any] = {"stations": STATIONS, "countries": countries or []}
     config = await mass.config.save_provider_config(DOMAIN, values, instance_id)
     # the server reloads a provider a second after its settings change; do it now
     await mass.load_provider_config(config)
