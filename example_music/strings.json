@@ -1,0 +1,6 @@
+{
+  "manifest": {
+    "name": "Example music",
+    "description": "A few test tones to play, to show how a music source works."
+  }
+}
