@@ -25,7 +25,9 @@ async def _provider(mass: MusicAssistant) -> MusicProvider:
     step = await mass.config.setup_provider(DOMAIN)
     assert step.result is not None
     instance_id = step.result["instance_id"]
-    await mass.config.save_provider_config(DOMAIN, {"stations": STATIONS}, instance_id)
+    config = await mass.config.save_provider_config(DOMAIN, {"stations": STATIONS}, instance_id)
+    # the server reloads a provider a second after its settings change; do it now
+    await mass.load_provider_config(config)
     provider = mass.get_provider(instance_id)
     assert isinstance(provider, MusicProvider)
     return provider
