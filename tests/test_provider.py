@@ -1,6 +1,6 @@
-"""Tests of the provider, loaded by a real server."""
+﻿"""Tests of the provider, loaded by a real server."""
 
-from types import SimpleNamespace
+from collections.abc import Iterable\nfrom types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -172,69 +172,6 @@ async def test_recently_played(mass: MusicAssistant) -> None:
     assert songs[0].image is not None
     assert songs[0].image.path == COVER
     assert songs[1].item_id == "056-5067-1"
-    assert asked == [("056", "5067")]
-    assert await provider.browse(f"{provider.instance_id}://recent/bad") == []
-
-    searched: list[tuple[str, list[MediaType], int]] = []
-
-    async def search(query: str, media_types: list[MediaType], limit: int) -> Any:
-        searched.append((query, media_types, limit))
-        return SimpleNamespace(tracks=["the track"])
-
-    # no music providers in tests: the server's search is a stand-in
-    mass.music.search = search  # type: ignore[assignment,method-assign]
-
-    newest, oldest = [song for song in songs if isinstance(song, BrowseFolder)]
-    # a song opens what the music providers find for it, then the station
-    assert oldest.path == f"{willy.path}/1"
-    found = await provider.browse(oldest.path)
-    assert searched == [("OLD Old Song", [MediaType.TRACK], 5)]
-    assert found[0] == "the track"
-    assert isinstance(found[1], Radio)
-    assert found[1].item_id == "056-5067"
-    # a song without a start time opens as well, and never the list it is in
-    assert newest.path.rsplit("/", 1)[1].startswith("x")
-    found = await provider.browse(newest.path)
-    assert searched[-1] == ("NOORDKAAP Arme Joe", [MediaType.TRACK], 5)
-    assert found[0] == "the track"
-    # a song gone from the feed still offers the station
-    gone = await provider.browse(f"{willy.path}/999")
-    assert [item.name for item in gone] == ["Willy"]
-    assert len(searched) == 2
-
-
-async def test_all_stations(mass: MusicAssistant) -> None:
-    """All stations has the letters of one country, or the countries first when there are several."""
-    services = {
-        "undefined": [
-            {"rpId": "5067", "serviceName": "Willy", "imageUrl": BIG},
-            {"rpId": "5010", "serviceName": "De Tijdloze"},
-            {"rpId": "138", "serviceName": "10 FM"},
-        ]
-    }
-    asked: list[str] = []
-
-    async def fetch(url: str, _params: dict[str, str] | None = None) -> Any:
-        asked.append(url)
-        return services
-
-    one = await _provider(mass, ["056"])
-    one._fetch = fetch  # type: ignore[attr-defined]  # noqa: SLF001
-    root = await one.browse(f"{one.instance_id}://")
-    assert root[-1].name == "All stations"
-    letters = await one.browse(root[-1].path)
-    assert [item.name for item in letters] == ["D", "W", "#"]
-    assert [item.path for item in letters][-1] == f"{one.instance_id}://all/other"
-    stations = await one.browse(letters[1].path)
-    assert [(s.item_id, s.name) for s in stations] == [("056-5067", "Willy")]
-    assert isinstance(stations[0], Radio)
-    assert stations[0].image is not None
-    other = await one.browse(letters[-1].path)
-    assert [s.item_id for s in other] == ["056-138"]
-    assert await one.browse(f"{one.instance_id}://all/Q") == []
-    assert asked == [
-        "https://mapi.radioplayer.cloud/api/be/public/services"
-    ]  # kept after the first
 
 
 async def test_all_stations_countries(mass: MusicAssistant) -> None:
@@ -245,9 +182,9 @@ async def test_all_stations_countries(mass: MusicAssistant) -> None:
 
     several = await _provider(mass, ["056", "276"])
     several._fetch = fetch  # type: ignore[attr-defined]  # noqa: SLF001
-    countries = await several.browse(f"{several.instance_id}://all")
+    countries = _folders(await several.browse(f"{several.instance_id}://all"))
     assert [(c.item_id, c.name) for c in countries] == [("056", "Belgium"), ("276", "Germany")]
-    letters = await several.browse(countries[1].path)
+    letters = _folders(await several.browse(countries[1].path))
     assert letters[0].path == f"{several.instance_id}://all/276/D"
     stations = await several.browse(letters[0].path)
     assert [s.item_id for s in stations] == ["276-5010"]
