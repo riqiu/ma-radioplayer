@@ -37,7 +37,8 @@ Under **Browse > Radioplayer > All stations**, the stations of the picked countr
 listed by first letter (names that start with a digit or a symbol are under **#**), and
 play or can be added to the library like a station found by search. With several countries
 there is a folder per country first. The lists come from the Radioplayer directory of each
-country and are kept for a day.
+country and are kept for a day. That directory is Radioplayer's public list and may miss
+some stations, which a search still finds.
 
 ## Install
 

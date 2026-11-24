@@ -191,9 +191,11 @@ def parse_search(answer: Any, country: str) -> list[tuple[str, str, str | None]]
     return list(found.values())
 
 
-def parse_services(answer: Any, country: str) -> dict[str, list[tuple[str, str, str | None]]]:
+def parse_services(
+    answer: Any, country: str
+) -> dict[str, list[tuple[str, str, str | None, str | None]]]:
     """
-    Return the stations of a directory by first letter: item id, name and logo.
+    Return the stations of a directory by first letter: item id, name, logo and slogan.
 
     The directory's own letters are not used: Belgium has all its stations under one key.
     A name that does not start with a letter goes under ``#``.
@@ -201,7 +203,7 @@ def parse_services(answer: Any, country: str) -> dict[str, list[tuple[str, str, 
     :param answer: The answer of the directory, a list of stations per key.
     :param country: The numeric code of the country.
     """
-    found: dict[str, tuple[str, str, str | None]] = {}
+    found: dict[str, tuple[str, str, str | None, str | None]] = {}
     for group in _values(answer):
         for item in _values(group):
             if not isinstance(item, dict):
@@ -210,8 +212,10 @@ def parse_services(answer: Any, country: str) -> dict[str, list[tuple[str, str, 
             name = _text(item.get("serviceName"))
             if rp_id.isdigit() and name:
                 item_id = f"{country}-{rp_id}"
-                found.setdefault(item_id, (item_id, name, _text(item.get("imageUrl")) or None))
-    letters: dict[str, list[tuple[str, str, str | None]]] = {}
+                logo = _text(item.get("imageUrl")) or None
+                slogan = " ".join(_text(item.get("shortDescription")).split()) or None
+                found.setdefault(item_id, (item_id, name, logo, slogan))
+    letters: dict[str, list[tuple[str, str, str | None, str | None]]] = {}
     for station in sorted(found.values(), key=lambda s: s[1].lower()):
         first = unicodedata.normalize("NFKD", station[1])[0].upper()
         letters.setdefault(first if "A" <= first <= "Z" else "#", []).append(station)

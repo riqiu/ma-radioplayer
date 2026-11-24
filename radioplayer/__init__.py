@@ -491,8 +491,10 @@ class RadioplayerProvider(MusicProvider):
             self.logger.debug("Radioplayer request %s failed: %s", url, err)
             raise ProviderUnavailableError(f"Radioplayer can't be reached: {err}") from err
 
-    def _radio(self, item_id: str, name: str, logo_url: str | None) -> Radio:
-        """Return the radio item of a station."""
+    def _radio(
+        self, item_id: str, name: str, logo_url: str | None, description: str | None = None
+    ) -> Radio:
+        """Return the radio item of a station, with its slogan as description when it has one."""
         radio = Radio(
             item_id=item_id,
             provider=self.instance_id,
@@ -505,6 +507,7 @@ class RadioplayerProvider(MusicProvider):
                 )
             },
         )
+        radio.metadata.description = description
         if logo_url:
             radio.metadata.add_image(
                 MediaItemImage(

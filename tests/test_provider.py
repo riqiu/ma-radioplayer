@@ -213,7 +213,7 @@ async def test_all_stations(mass: MusicAssistant) -> None:
     """All stations has the letters of one country, or the countries first when there are several."""
     services = {
         "undefined": [
-            {"rpId": "5067", "serviceName": "Willy", "imageUrl": BIG},
+            {"rpId": "5067", "serviceName": "Willy", "imageUrl": BIG, "shortDescription": "Hits"},
             {"rpId": "5010", "serviceName": "De Tijdloze"},
             {"rpId": "138", "serviceName": "10 FM"},
         ]
@@ -233,6 +233,7 @@ async def test_all_stations(mass: MusicAssistant) -> None:
     assert [(s.item_id, s.name) for s in stations] == [("056-5067", "Willy")]
     assert isinstance(stations[0], Radio)
     assert stations[0].image is not None
+    assert stations[0].metadata.description == "Hits"
     other = await one.browse(letters[-1].path)
     assert [s.item_id for s in other] == ["056-138"]
     assert await one.browse(f"{one.instance_id}://all/Q") == []

@@ -212,7 +212,7 @@ def test_search() -> None:
     hits = parse_search(parse_json(SEARCH_JSONP), "056")
     assert hits == [
         ("056-5067", "Willy", "https://assets.radioplayer.org/056/0565067/600/600/a.png"),
-        ("056-5010", "De Tijdloze", None),
+        ("056-5010", "De Tijdloze", None, None),
     ]
     assert parse_search({"results": []}, "056") == []
     assert parse_search(None, "056") == []
@@ -223,7 +223,13 @@ def test_services() -> None:
     # shaped like the real answer: Belgium has one key for all its stations
     answer = {
         "undefined": [
-            {"rpId": "5067", "serviceName": "Willy", "imageUrl": "https://logo.example/w.png"},
+            {
+                "rpId": "5067",
+                "serviceName": "Willy",
+                "imageUrl": "https://logo.example/w.png",
+                "shortDescription": "Hits
+all day",
+            },
             {"rpId": "5010", "serviceName": "De Tijdloze", "imageUrl": ""},
             {"rpId": "138", "serviceName": "10 FM"},
             {"rpId": "9", "serviceName": "  Écho "},
@@ -234,10 +240,10 @@ def test_services() -> None:
         ]
     }
     assert parse_services(answer, "056") == {
-        "D": [("056-5010", "De Tijdloze", None)],
-        "E": [("056-9", "Écho", None)],
-        "W": [("056-5067", "Willy", "https://logo.example/w.png")],
-        "#": [("056-138", "10 FM", None)],
+        "D": [("056-5010", "De Tijdloze", None, None)],
+        "E": [("056-9", "Écho", None, None)],
+        "W": [("056-5067", "Willy", "https://logo.example/w.png", "Hits all day")],
+        "#": [("056-138", "10 FM", None, None)],
     }
     assert parse_services(None, "056") == {}
 
