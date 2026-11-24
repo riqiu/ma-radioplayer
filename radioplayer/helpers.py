@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 import zlib
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -188,6 +189,33 @@ def parse_search(answer: Any, country: str) -> list[tuple[str, str, str | None]]
                 item_id = f"{country}-{rp_id}"
                 found.setdefault(item_id, (item_id, name, _text(item.get("imageUrl")) or None))
     return list(found.values())
+
+
+def parse_services(answer: Any, country: str) -> dict[str, list[tuple[str, str, str | None]]]:
+    """
+    Return the stations of a directory by first letter: item id, name and logo.
+
+    The directory's own letters are not used: Belgium has all its stations under one key.
+    A name that does not start with a letter goes under ``#``.
+
+    :param answer: The answer of the directory, a list of stations per key.
+    :param country: The numeric code of the country.
+    """
+    found: dict[str, tuple[str, str, str | None]] = {}
+    for group in _values(answer):
+        for item in _values(group):
+            if not isinstance(item, dict):
+                continue
+            rp_id = str(item.get("rpId") or "").strip()
+            name = _text(item.get("serviceName"))
+            if rp_id.isdigit() and name:
+                item_id = f"{country}-{rp_id}"
+                found.setdefault(item_id, (item_id, name, _text(item.get("imageUrl")) or None))
+    letters: dict[str, list[tuple[str, str, str | None]]] = {}
+    for station in sorted(found.values(), key=lambda s: s[1].lower()):
+        first = unicodedata.normalize("NFKD", station[1])[0].upper()
+        letters.setdefault(first if "A" <= first <= "Z" else "#", []).append(station)
+    return dict(sorted(letters.items(), key=lambda kv: (kv[0] == "#", kv[0])))
 
 
 def parse_service(service: Any) -> tuple[str, str | None, str | None] | None:

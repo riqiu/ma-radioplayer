@@ -62,6 +62,7 @@ from .helpers import (
     parse_now_playing,
     parse_search,
     parse_service,
+    parse_services,
     parse_stations,
     poll_seconds,
     split_stream_title,
@@ -83,6 +84,7 @@ SUPPORTED_FEATURES = {
 CONF_COUNTRIES: Final[str] = "countries"
 CONF_STATIONS: Final[str] = "stations"
 RECENT_FOLDER: Final[str] = "recent"
+ALL_FOLDER: Final[str] = "all"
 # how many tracks a song of Recently played offers from the user's music providers
 SONG_SEARCH_LIMIT: Final[int] = 5
 # the search answer when no country is picked
@@ -91,6 +93,7 @@ HINT: Final[str] = "Pick one or more countries in the Radioplayer settings"
 FEED_URL: Final[str] = "https://core-search.radioplayer.cloud/{country}/qp/v4/events"
 SEARCH_URL: Final[str] = "https://core-search.radioplayer.cloud/{country}/qp/v4/search"
 SERVICE_URL: Final[str] = "https://mapi.radioplayer.cloud/api/{directory}/public/service/{rp_id}"
+SERVICES_URL: Final[str] = "https://mapi.radioplayer.cloud/api/{directory}/public/services"
 REQUEST_TIMEOUT: Final[aiohttp.ClientTimeout] = aiohttp.ClientTimeout(total=10)
 # the stations of a country change seldom; a failed search is not kept
 SEARCH_CACHE_SECONDS: Final[int] = 24 * 3600
@@ -230,10 +233,10 @@ class RadioplayerProvider(MusicProvider):
         """
         Return the stations of the settings and the songs the stations played last.
 
-        The root has the stations of the settings and a folder Recently played, with a folder
-        per station of the settings or the library, which lists its last songs from the feed.
+        The root has the stations of the settings, a folder Recently played, with a folder
+        per station of the settings or the library, which lists its last songs from the feed,
+        and a folder All stations, with the stations of the picked countries by first letter.
         A song opens the tracks that the music providers find for it, and the station.
-        Radioplayer's other stations are found by search.
 
         :param path: The path to browse, such as ``radioplayer://recent/056-5067``.
         """
@@ -246,13 +249,11 @@ class RadioplayerProvider(MusicProvider):
                     self._radio(station.item_id, station.name, station.logo_url)
                     for station in self._stations.values()
                 ),
-                BrowseFolder(
-                    item_id=RECENT_FOLDER,
-                    provider=self.instance_id,
-                    path=recent,
-                    name="Recently played",
-                ),
+                self._folder(RECENT_FOLDER, recent, "Recently played"),
+                self._folder(ALL_FOLDER, f"{prefix}://{ALL_FOLDER}", "All stations"),
             ]
+        if parts[0] == ALL_FOLDER:
+            return await self._all_stations(f"{prefix}://{ALL_FOLDER}", parts[1:])
         if parts[0] != RECENT_FOLDER:
             return []
         if len(parts) == 1:
@@ -269,6 +270,35 @@ class RadioplayerProvider(MusicProvider):
         if len(parts) == 2:
             return await self._recently_played(parts[1], f"{recent}/{parts[1]}")
         return await self._song(parts[1], parts[2])
+
+    def _folder(self, item_id: str, path: str, name: str) -> BrowseFolder:
+        """Return a folder of the browse tree."""
+        return BrowseFolder(item_id=item_id, provider=self.instance_id, path=path, name=name)
+
+    async def _all_stations(self, path: str, parts: list[str]) -> list[BrowseFolder | Radio]:
+        """
+        Return a level of All stations: the countries when several are picked, then the letters.
+
+        :param path: The path of All stations, or of the country below it.
+        :param parts: The rest of the path: the country (when several), then the letter.
+        """
+        if len(self._countries) == 1:
+            country = self._countries[0]
+        elif not parts:
+            return [self._folder(c, f"{path}/{c}", COUNTRIES[c][1]) for c in self._countries]
+        elif parts[0] in self._countries:
+            country, parts, path = parts[0], parts[1:], f"{path}/{parts[0]}"
+        else:
+            return []
+        letters = parse_services(await self._services(country), country)
+        if not parts:
+            return [
+                # the folder of # is called other, as a # would end a path
+                self._folder(letter, f"{path}/{'other' if letter == '#' else letter}", letter)
+                for letter in letters
+            ]
+        letter = "#" if parts[0] == "other" else parts[0].upper()
+        return [self._radio(*station) for station in letters.get(letter, [])]
 
     async def _known_stations(self) -> dict[str, tuple[str, MediaItemImage | None]]:
         """Return the name and logo of the stations of the settings and of the library."""
@@ -426,6 +456,14 @@ class RadioplayerProvider(MusicProvider):
         if isinstance(answer, dict) and isinstance(answer.get("results"), dict | list):
             return answer
         return None
+
+    @use_cache(SEARCH_CACHE_SECONDS, cache_none=False)
+    async def _services(self, country: str) -> Any:
+        """Return all stations of a country's directory, or None when it fails."""
+        try:
+            return await self._fetch(SERVICES_URL.format(directory=COUNTRIES[country][0]))
+        except ProviderUnavailableError:
+            return None
 
     async def _service(self, country: str, rp_id: str) -> Any:
         """Return the entry of a station in the directory, or None when it fails."""

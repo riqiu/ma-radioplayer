@@ -151,8 +151,13 @@ async def test_recently_played(mass: MusicAssistant) -> None:
     provider._events = events  # type: ignore[attr-defined]  # noqa: SLF001
 
     root = await provider.browse(f"{provider.instance_id}://")
-    assert [item.name for item in root] == ["Willy", "Studio Brussel", "Recently played"]
-    recent = root[-1]
+    assert [item.name for item in root] == [
+        "Willy",
+        "Studio Brussel",
+        "Recently played",
+        "All stations",
+    ]
+    recent = root[-2]
     assert isinstance(recent, BrowseFolder)
 
     stations = await provider.browse(recent.path)
@@ -196,6 +201,57 @@ async def test_recently_played(mass: MusicAssistant) -> None:
     gone = await provider.browse(f"{willy.path}/999")
     assert [item.name for item in gone] == ["Willy"]
     assert len(searched) == 2
+
+
+async def test_all_stations(mass: MusicAssistant) -> None:
+    """All stations has the letters of one country, or the countries first when there are several."""
+    services = {
+        "undefined": [
+            {"rpId": "5067", "serviceName": "Willy", "imageUrl": BIG},
+            {"rpId": "5010", "serviceName": "De Tijdloze"},
+            {"rpId": "138", "serviceName": "10 FM"},
+        ]
+    }
+    asked: list[str] = []
+
+    async def fetch(url: str, _params: dict[str, str] | None = None) -> Any:
+        asked.append(url)
+        return services
+
+    one = await _provider(mass, ["056"])
+    one._fetch = fetch  # type: ignore[attr-defined]  # noqa: SLF001
+    root = await one.browse(f"{one.instance_id}://")
+    assert root[-1].name == "All stations"
+    letters = await one.browse(root[-1].path)
+    assert [item.name for item in letters] == ["D", "W", "#"]
+    assert [item.path for item in letters][-1] == f"{one.instance_id}://all/other"
+    stations = await one.browse(letters[1].path)
+    assert [(s.item_id, s.name) for s in stations] == [("056-5067", "Willy")]
+    assert isinstance(stations[0], Radio)
+    assert stations[0].image is not None
+    other = await one.browse(letters[-1].path)
+    assert [s.item_id for s in other] == ["056-138"]
+    assert await one.browse(f"{one.instance_id}://all/Q") == []
+    assert asked == [
+        "https://mapi.radioplayer.cloud/api/be/public/services"
+    ]  # kept after the first
+
+
+async def test_all_stations_countries(mass: MusicAssistant) -> None:
+    """With several countries All stations lists the countries first."""
+
+    async def fetch(_url: str, _params: dict[str, str] | None = None) -> Any:
+        return {"d": [{"rpId": "5010", "serviceName": "De Tijdloze"}]}
+
+    several = await _provider(mass, ["056", "276"])
+    several._fetch = fetch  # type: ignore[attr-defined]  # noqa: SLF001
+    countries = await several.browse(f"{several.instance_id}://all")
+    assert [(c.item_id, c.name) for c in countries] == [("056", "Belgium"), ("276", "Germany")]
+    letters = await several.browse(countries[1].path)
+    assert letters[0].path == f"{several.instance_id}://all/276/D"
+    stations = await several.browse(letters[0].path)
+    assert [s.item_id for s in stations] == ["276-5010"]
+    assert await several.browse(f"{several.instance_id}://all/999") == []
 
 
 async def test_default_country(mass: MusicAssistant, monkeypatch: pytest.MonkeyPatch) -> None:
