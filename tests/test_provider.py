@@ -60,6 +60,16 @@ async def test_stations(mass: MusicAssistant) -> None:
     radio = result.radio[0]
     assert isinstance(radio, Radio)
 
+    # no country picked and no station found: one entry says how to find stations
+    hints = (await provider.search("nothing", [MediaType.RADIO])).radio
+    assert [hint.name for hint in hints] == [
+        "Pick one or more countries in the Radioplayer settings"
+    ]
+    assert isinstance(hints[0], Radio)
+    assert not any(mapping.available for mapping in hints[0].provider_mappings)
+    with pytest.raises(MediaNotFoundError, match="Pick one or more countries"):
+        await provider.get_stream_details(hints[0].item_id, MediaType.RADIO)
+
     details = await provider.get_stream_details(radio.item_id, MediaType.RADIO)
     assert details.stream_type == StreamType.HTTP
     assert details.path == "https://stream.example/stubru.aac"
