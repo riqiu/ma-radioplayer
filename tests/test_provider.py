@@ -1,5 +1,6 @@
 """Tests of the provider, loaded by a real server."""
 
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -158,6 +159,50 @@ async def test_recently_played(mass: MusicAssistant) -> None:
     assert songs[1].item_id == "056-5067-1"
     assert asked == [("056", "5067")]
     assert await provider.browse(f"{provider.instance_id}://recent/bad") == []
+
+    searched: list[tuple[str, list[MediaType], int]] = []
+
+    async def search(query: str, media_types: list[MediaType], limit: int) -> Any:
+        searched.append((query, media_types, limit))
+        return SimpleNamespace(tracks=["the track"])
+
+    # no music providers in tests: the server's search is a stand-in
+    mass.music.search = search  # type: ignore[assignment,method-assign]
+
+    # a song opens what the music providers find for it, then the station
+    assert songs[1].path == f"{willy.path}/1"
+    found = await provider.browse(songs[1].path)
+    assert searched == [("OLD Old Song", [MediaType.TRACK], 5)]
+    assert found[0] == "the track"
+    assert isinstance(found[1], Radio)
+    assert found[1].item_id == "056-5067"
+    # a song without a start time opens as well, and never the list it is in
+    assert songs[0].path.rsplit("/", 1)[1].startswith("x")
+    found = await provider.browse(songs[0].path)
+    assert searched[-1] == ("NOORDKAAP Arme Joe", [MediaType.TRACK], 5)
+    assert found[0] == "the track"
+    # a song gone from the feed still offers the station
+    gone = await provider.browse(f"{willy.path}/999")
+    assert [item.name for item in gone] == ["Willy"]
+    assert len(searched) == 2
+
+
+async def test_default_country(mass: MusicAssistant, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The countries default to the one of the server: its time zone, else its language."""
+    provider = await _provider(mass)
+
+    async def default() -> Any:
+        entries = await provider.get_config_entries()
+        return next(e for e in entries if e.key == "countries").default_value
+
+    # a Belgian browser: Music Assistant keeps nl_NL, the time zone still says Belgium
+    mass.metadata.set_preferred_language("nl-BE")
+    monkeypatch.setenv("TZ", "Europe/Brussels")
+    assert await default() == ["056"]
+    monkeypatch.setenv("TZ", "UTC")
+    assert await default() == []
+    mass.metadata.set_preferred_language("en-GB")
+    assert await default() == ["826"]
 
 
 async def test_radioplayer_stations(mass: MusicAssistant) -> None:

@@ -3,7 +3,7 @@
   "domain": "radioplayer",
   "stage": "alpha",
   "name": "Radioplayer",
-  "description": "Radio stations from Radioplayer, found by search or listed by you, showing the artist, title and cover of what plays now, and the songs they played last, from the public Radioplayer feed.",
+  "description": "Radio stations from Radioplayer, found by search or listed by you, showing the artist, title and cover of what plays now, and the songs they played last, from the public Radioplayer feed; a song opens the matching tracks of your other music providers.",
   "codeowners": ["@riqiu"],
   "provides": ["radio"],
   "requirements": [],

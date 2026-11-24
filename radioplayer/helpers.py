@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import zlib
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
@@ -28,6 +29,56 @@ COUNTRIES: dict[str, tuple[str, str]] = {
     "756": ("ch", "Switzerland"),
     "826": ("uk", "United Kingdom"),
 }
+# the time zones of these countries, for the default country of the server
+TIMEZONES: dict[str, str] = {
+    "Europe/Vienna": "040",
+    "Europe/Brussels": "056",
+    "Europe/Copenhagen": "208",
+    "Europe/Helsinki": "246",
+    "Europe/Mariehamn": "246",
+    "Europe/Paris": "250",
+    "Europe/Berlin": "276",
+    "Europe/Busingen": "276",
+    "Europe/Rome": "380",
+    "Europe/Luxembourg": "442",
+    "Europe/Oslo": "578",
+    "Arctic/Longyearbyen": "578",
+    "Europe/Madrid": "724",
+    "Africa/Ceuta": "724",
+    "Atlantic/Canary": "724",
+    "Europe/Zurich": "756",
+    "Europe/London": "826",
+    "Europe/Belfast": "826",
+    "GB": "826",
+}
+# shortcut: the main zones of Canada only; add one when a Canadian user's zone is missing
+CANADA_TIMEZONES: frozenset[str] = frozenset(
+    {
+        "America/St_Johns",
+        "America/Halifax",
+        "America/Glace_Bay",
+        "America/Moncton",
+        "America/Goose_Bay",
+        "America/Toronto",
+        "America/Montreal",
+        "America/Winnipeg",
+        "America/Regina",
+        "America/Swift_Current",
+        "America/Edmonton",
+        "America/Vancouver",
+        "America/Whitehorse",
+        "America/Yellowknife",
+        "America/Iqaluit",
+        "Canada/Newfoundland",
+        "Canada/Atlantic",
+        "Canada/Eastern",
+        "Canada/Central",
+        "Canada/Saskatchewan",
+        "Canada/Mountain",
+        "Canada/Pacific",
+        "Canada/Yukon",
+    }
+)
 # a Radioplayer id: the numeric country code, a slash and the id of the station
 RADIOPLAYER_ID = re.compile(r"(\d{3})/(\d+)")
 # the id of a station in Music Assistant: the same with a dash
@@ -195,8 +246,9 @@ def parse_history(events: Any) -> list[tuple[str, str | None, str, str | None]]:
     """
     Return the songs a station played before the current one, newest first, each once.
 
-    Each song is its start time as the feed gives it, its artist (None when the feed has
-    none), its title and its picture as the feed gives it: the cover, or else the logo.
+    Each song is a key, its artist (None when the feed has none), its title and its picture
+    as the feed gives it: the cover, or else the logo. The key is the start time, or for a
+    song without one a code of its artist and title, so it stays the same and is never empty.
 
     :param events: The answer of the events feed, whose ``previous`` lists the songs oldest
         first and often twice.
@@ -209,7 +261,7 @@ def parse_history(events: Any) -> list[tuple[str, str | None, str, str | None]]:
             continue
         title, artist = _text(item.get("name")), _text(item.get("artistName"))
         if title:
-            start = _text(item.get("startTime"))
+            start = _text(item.get("startTime")) or f"x{zlib.crc32(f'{artist}|{title}'.encode()):x}"
             image = _text(item.get("imageUrl")) or None
             songs.setdefault((start, artist, title), (start, artist or None, title, image))
     return list(songs.values())
@@ -265,3 +317,25 @@ def _epoch(value: Any) -> float | None:
         return float(value) if value not in (None, "") else None
     except TypeError, ValueError:
         return None
+
+
+def default_countries(timezone: str, locale: str) -> list[str]:
+    """
+    Return the Radioplayer country of the server, or none when it is outside them.
+
+    The time zone decides, as it names the country (``Europe/Brussels``); the language of
+    Music Assistant only when the time zone is not one of these countries, as its locale
+    has a country for a few languages only (``fr_FR``, never ``nl_BE``).
+
+    :param timezone: The IANA time zone of the server, such as ``Europe/Brussels``.
+    :param locale: The language of Music Assistant, such as ``en_GB``.
+    """
+    if country := TIMEZONES.get(timezone):
+        return [country]
+    if timezone in CANADA_TIMEZONES:
+        return ["124"]
+    parts = re.split(r"[_-]", locale.strip())
+    region = parts[1].lower() if len(parts) > 1 else ""
+    # the directory calls the United Kingdom uk; its ISO code is GB
+    region = "uk" if region == "gb" else region
+    return [code for code, (directory, _title) in COUNTRIES.items() if directory == region]

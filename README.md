@@ -24,8 +24,12 @@ the programme.
 
 Under **Browse > Radioplayer > Recently played**, each station of the settings or of the
 library has a folder with the songs it played last, newest first: the artist, the title and
-the cover, as far back as the feed goes (about half an hour to an hour). The songs are only
-listed; the provider can't play a single song.
+the cover, as far back as the feed goes (about half an hour to an hour). The provider can't
+play a single song from the radio, so a song opens the tracks that your other music providers
+find for its artist and title, ready to play, followed by the station itself. A song without
+an artist in the feed opens the station only. The tracks found are kept for a few minutes and
+shared by all users of the server, so on a server with several users one may see tracks
+found for another.
 
 ## Install
 
@@ -35,7 +39,10 @@ your Music Assistant server, then add it under **Settings > Providers**.
 
 ## Find stations
 
-Pick one or more **Countries** in the settings of the provider (Belgium by default). The
+Pick one or more **Countries** in the settings of the provider. Until you pick, it is the
+country of your server, from its time zone (`Europe/Brussels` gives Belgium) or else the
+language setting of Music Assistant (`en_GB` gives the United Kingdom), when Radioplayer runs
+there; otherwise none is picked and the search finds no stations. The
 search of Music Assistant then finds the Radioplayer stations of those countries under
 **Radio**; add the ones you want to your library. Radioplayer gives the search on these
 countries: Austria, Belgium, Canada, Denmark, Finland, France, Germany, Italy, Luxembourg,
@@ -105,8 +112,9 @@ provider asks the feed of that station at most as often as the feed says it may 
 on that station. After a failed request it waits a minute before it asks again. It sends no
 account, key or personal data: only the id of the station, or the text searched for.
 
-A search asks each picked country once and keeps the answer for a day. Starting a station
-found by search asks Radioplayer's station directory for its streams.
+A search asks each picked country once and keeps the answer for a day. Opening a song under
+Recently played searches your music providers for it, as the search of Music Assistant does.
+Starting a station found by search asks Radioplayer's station directory for its streams.
 
 The provider tells Music Assistant to keep the title of the stream aside instead of showing
 it, and uses that title only while the feed fails.
