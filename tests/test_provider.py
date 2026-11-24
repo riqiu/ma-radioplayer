@@ -226,7 +226,7 @@ async def test_all_stations(mass: MusicAssistant) -> None:
     one._fetch = fetch  # type: ignore[attr-defined]  # noqa: SLF001
     root = await one.browse(f"{one.instance_id}://")
     assert root[-1].name == "All stations"
-    letters = _folders(await one.browse(root[-1].path))
+    letters = _folders(await one.browse(_folders(root)[-1].path))
     assert [item.name for item in letters] == ["D", "W", "#"]
     assert [item.path for item in letters][-1] == f"{one.instance_id}://all/other"
     stations = await one.browse(letters[1].path)
