@@ -266,12 +266,11 @@ async def test_all_stations_crowded(mass: MusicAssistant) -> None:
 
     async def walk(path: str, depth: int) -> None:
         items = await provider.browse(path)
-        if folders := _folders(items):
-            for folder in folders:
-                await walk(folder.path, depth + 1)
-            return
-        sizes.append(len(items))
-        depths.append(depth)
+        for folder in _folders(items):
+            await walk(folder.path, depth + 1)
+        if radios := [item for item in items if not isinstance(item, BrowseFolder)]:
+            sizes.append(len(radios))
+            depths.append(depth)
 
     await walk(letters[0].path, 1)
     assert sum(sizes) == 1501

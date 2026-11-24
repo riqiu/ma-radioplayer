@@ -65,8 +65,8 @@ from .helpers import (
     parse_services,
     parse_stations,
     poll_seconds,
-    split_stream_title,
     split_stations,
+    split_stream_title,
     station_prefix,
 )
 
@@ -319,7 +319,12 @@ class RadioplayerProvider(MusicProvider):
         if len(stations) > CROWDED_LETTER and (
             groups := split_stations(stations, len(parts[-1]) if len(parts) > 1 else 1)
         ):
-            return [folder(f"{rel}{'/'.join(parts)}/{name}", name) for name in groups]
+            # a name that ends here (Radio 1 beside Radio 10) is a station, not a folder
+            longest = max(map(len, groups))
+            return [
+                *(folder(f"{rel}{'/'.join(parts)}/{k}", k) for k in groups if len(k) == longest),
+                *(self._hit(*s) for k, g in groups.items() if len(k) < longest for s in g),
+            ]
         return [self._hit(*station) for station in stations]
 
     def _hit(self, item_id: str, name: str, logo: str | None, slogan: str | None) -> Radio:
