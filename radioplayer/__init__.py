@@ -63,10 +63,10 @@ from .helpers import (
     parse_search,
     parse_service,
     parse_services,
-    station_prefix,
     parse_stations,
     poll_seconds,
     split_stream_title,
+    station_prefix,
 )
 
 if TYPE_CHECKING:

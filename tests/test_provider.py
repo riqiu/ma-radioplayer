@@ -255,7 +255,7 @@ async def test_all_stations_crowded(mass: MusicAssistant) -> None:
     base = f"{provider.instance_id}://all/056"
     letters = _folders(await provider.browse(base))
     assert [item.name for item in letters] == ["R", "T", "Ø"]
-    assert [item.item_id for item in letters][0] == "056/R"
+    assert letters[0].item_id == "056/R"
     second = _folders(await provider.browse(letters[0].path))
     assert [item.name for item in second] == ["RA"]
     assert second[0].path == f"{base}/R/RA"
