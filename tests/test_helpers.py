@@ -227,12 +227,11 @@ def test_services() -> None:
                 "rpId": "5067",
                 "serviceName": "Willy",
                 "imageUrl": "https://logo.example/w.png",
-                "shortDescription": "Hits
-all day",
+                "shortDescription": "Hits\nall day",
             },
             {"rpId": "5010", "serviceName": "De Tijdloze", "imageUrl": ""},
             {"rpId": "138", "serviceName": "10 FM"},
-            {"rpId": "9", "serviceName": "  Écho "},
+            {"rpId": "9", "serviceName": "  Ã‰cho "},
             {"rpId": "5067", "serviceName": "Willy again"},
             {"rpId": "x", "serviceName": "No id"},
             {"rpId": "7", "serviceName": ""},
@@ -241,7 +240,7 @@ all day",
     }
     assert parse_services(answer, "056") == {
         "D": [("056-5010", "De Tijdloze", None, None)],
-        "E": [("056-9", "Écho", None, None)],
+        "E": [("056-9", "Ã‰cho", None, None)],
         "W": [("056-5067", "Willy", "https://logo.example/w.png", "Hits all day")],
         "#": [("056-138", "10 FM", None, None)],
     }
