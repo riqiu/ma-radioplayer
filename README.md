@@ -42,7 +42,8 @@ your Music Assistant server, then add it under **Settings > Providers**.
 Pick one or more **Countries** in the settings of the provider. Until you pick, it is the
 country of your server, from its time zone (`Europe/Brussels` gives Belgium) or else the
 language setting of Music Assistant (`en_GB` gives the United Kingdom), when Radioplayer runs
-there; otherwise none is picked and the search finds no stations. The
+there; otherwise none is picked, and the search answers with one entry that says to pick a
+country. The
 search of Music Assistant then finds the Radioplayer stations of those countries under
 **Radio**; add the ones you want to your library. Radioplayer gives the search on these
 countries: Austria, Belgium, Canada, Denmark, Finland, France, Germany, Italy, Luxembourg,

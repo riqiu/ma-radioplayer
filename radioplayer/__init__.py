@@ -85,6 +85,9 @@ CONF_STATIONS: Final[str] = "stations"
 RECENT_FOLDER: Final[str] = "recent"
 # how many tracks a song of Recently played offers from the user's music providers
 SONG_SEARCH_LIMIT: Final[int] = 5
+# the search answer when no country is picked
+HINT_ID: Final[str] = "pick-country"
+HINT: Final[str] = "Pick one or more countries in the Radioplayer settings"
 FEED_URL: Final[str] = "https://core-search.radioplayer.cloud/{country}/qp/v4/events"
 SEARCH_URL: Final[str] = "https://core-search.radioplayer.cloud/{country}/qp/v4/search"
 SERVICE_URL: Final[str] = "https://mapi.radioplayer.cloud/api/{directory}/public/service/{rp_id}"
@@ -215,6 +218,12 @@ class RadioplayerProvider(MusicProvider):
                 if hit[0] not in self._stations:
                     found.setdefault(hit[0], hit)
         result.radio = [self._radio(*hit) for hit in list(found.values())[:limit]]
+        if not self._countries and not found:
+            # without a country the search finds nothing: say why, as a station not to play
+            hint = self._radio(HINT_ID, HINT, None)
+            for mapping in hint.provider_mappings:
+                mapping.available = False
+            result.radio = [hint]
         return result
 
     async def browse(self, path: str) -> Sequence[MediaItemType | ItemMapping | BrowseFolder]:
@@ -472,6 +481,8 @@ class RadioplayerProvider(MusicProvider):
 
 def _catalog_id(item_id: str) -> tuple[str, str]:
     """Return the country code and Radioplayer id of a station outside the settings."""
+    if item_id == HINT_ID:
+        raise MediaNotFoundError(HINT)
     ids = parse_item_id(item_id)
     if ids is None or ids[0] not in COUNTRIES:
         raise MediaNotFoundError(f"Unknown station: {item_id}")
