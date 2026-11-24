@@ -9,6 +9,7 @@ from radioplayer.helpers import (
     MAX_POLL_SECONDS,
     MIN_POLL_SECONDS,
     STALE_AFTER_SECONDS,
+    default_countries,
     parse_history,
     parse_item_id,
     parse_json,
@@ -107,6 +108,12 @@ def test_history() -> None:
         (str(START), "NOORDKAAP", "Arme Joe", LOGO),
         ("1", None, "Old Song", COVER),
     ]
+    # a song without a start time gets a key of its own, the same at every answer
+    no_start = {**_song(), "startTime": "", "name": "No Start"}
+    events["results"]["previous"] = [no_start]
+    key = parse_history(events)[0][0]
+    assert key.startswith("x")
+    assert parse_history(events)[0][0] == key
     assert parse_history(_events(None)) == []
     assert parse_history(None) == []
 
@@ -221,3 +228,24 @@ def test_service() -> None:
     assert parse_service({**SERVICE, "deleted": True}) is None
     assert parse_service({"message": "Forbidden"}) is None
     assert parse_service(None) is None
+
+
+@pytest.mark.parametrize(
+    ("timezone", "locale", "countries"),
+    [
+        # Music Assistant has no nl_BE: a Belgian server has nl_NL or fr_FR
+        ("Europe/Brussels", "nl_NL", ["056"]),
+        ("Europe/Brussels", "fr_FR", ["056"]),
+        ("Europe/Vienna", "de_DE", ["040"]),
+        ("America/Toronto", "en_US", ["124"]),
+        # a container without a time zone: the language decides
+        ("UTC", "en_GB", ["826"]),
+        ("UTC", "fr_FR", ["250"]),
+        ("UTC", "nl_NL", []),
+        ("Asia/Tokyo", "en_US", []),
+        ("UTC", "en", []),
+    ],
+)
+def test_default_countries(timezone: str, locale: str, countries: list[str]) -> None:
+    """The default country is the one of the server, when Radioplayer runs there."""
+    assert default_countries(timezone, locale) == countries

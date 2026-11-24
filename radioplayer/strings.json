@@ -2,7 +2,7 @@
   "config_entries": {
     "countries": {
       "label": "Countries",
-      "description": "The countries whose Radioplayer stations the search finds. A station found by search plays from the stream that Radioplayer lists for it.",
+      "description": "The countries whose Radioplayer stations the search finds. Until you pick, the country of the server (its time zone, else the language of Music Assistant), when Radioplayer runs there. A station found by search plays from the stream that Radioplayer lists for it.",
       "options": {
         "040": "Austria",
         "056": "Belgium",

@@ -48,12 +48,14 @@ from music_assistant.controllers.streams.constants import (
     STREAMDETAILS_INBAND_TITLE_HANDOFF_KEY,
     STREAMDETAILS_INBAND_TITLE_KEY,
 )
+from music_assistant.helpers.datetime import host_timezone_name
 from music_assistant.helpers.throttle_retry import Throttler
 from music_assistant.models.music_provider import MusicProvider
 
 from .helpers import (
     COUNTRIES,
     Station,
+    default_countries,
     parse_history,
     parse_item_id,
     parse_json,
@@ -81,7 +83,8 @@ SUPPORTED_FEATURES = {
 CONF_COUNTRIES: Final[str] = "countries"
 CONF_STATIONS: Final[str] = "stations"
 RECENT_FOLDER: Final[str] = "recent"
-DEFAULT_COUNTRIES: Final[list[str]] = ["056"]
+# how many tracks a song of Recently played offers from the user's music providers
+SONG_SEARCH_LIMIT: Final[int] = 5
 FEED_URL: Final[str] = "https://core-search.radioplayer.cloud/{country}/qp/v4/events"
 SEARCH_URL: Final[str] = "https://core-search.radioplayer.cloud/{country}/qp/v4/search"
 SERVICE_URL: Final[str] = "https://mapi.radioplayer.cloud/api/{directory}/public/service/{rp_id}"
@@ -124,7 +127,8 @@ class RadioplayerProvider(MusicProvider):
                     ConfigValueOption(title=title, value=code)
                     for code, (_directory, title) in COUNTRIES.items()
                 ],
-                default_value=DEFAULT_COUNTRIES,
+                # the country of the server, when Radioplayer runs there
+                default_value=default_countries(host_timezone_name(), self.mass.metadata.locale),
                 required=False,
             ),
             ConfigEntry(
@@ -140,6 +144,8 @@ class RadioplayerProvider(MusicProvider):
         """Read the countries and the stations from the settings."""
         countries = cast("list[str]", self.config.get_value(CONF_COUNTRIES) or [])
         self._countries = [str(code) for code in countries if str(code) in COUNTRIES]
+        if not self._countries:
+            self.logger.info("No country picked: the search finds no Radioplayer stations")
         lines = cast("list[str]", self.config.get_value(CONF_STATIONS) or [])
         self._stations, errors = parse_stations([str(line) for line in lines])
         for error in errors:
@@ -217,6 +223,7 @@ class RadioplayerProvider(MusicProvider):
 
         The root has the stations of the settings and a folder Recently played, with a folder
         per station of the settings or the library, which lists its last songs from the feed.
+        A song opens the tracks that the music providers find for it, and the station.
         Radioplayer's other stations are found by search.
 
         :param path: The path to browse, such as ``radioplayer://recent/056-5067``.
@@ -250,7 +257,9 @@ class RadioplayerProvider(MusicProvider):
                 )
                 for item_id, (name, image) in (await self._known_stations()).items()
             ]
-        return await self._recently_played(parts[1], f"{recent}/{parts[1]}")
+        if len(parts) == 2:
+            return await self._recently_played(parts[1], f"{recent}/{parts[1]}")
+        return await self._song(parts[1], parts[2])
 
     async def _known_stations(self) -> dict[str, tuple[str, MediaItemImage | None]]:
         """Return the name and logo of the stations of the settings and of the library."""
@@ -268,10 +277,11 @@ class RadioplayerProvider(MusicProvider):
         """
         Return the songs a station played last, newest first, from its feed.
 
-        The songs are folders, not tracks: the provider can't play a single song.
+        The songs are folders, not tracks: the provider can't play a single song, so a song
+        opens what the music providers find for it.
 
         :param item_id: The id of the station.
-        :param path: The path of the folder of the station; a song leads back to it.
+        :param path: The path of the folder of the station.
         """
         ids = parse_item_id(item_id)
         events = await self._events(*ids) if ids else None
@@ -280,7 +290,7 @@ class RadioplayerProvider(MusicProvider):
                 # the start time keeps the id of a song the same while newer songs arrive
                 item_id=f"{item_id}-{start}",
                 provider=self.instance_id,
-                path=path,
+                path=f"{path}/{start}",
                 name=f"{artist} - {title}" if artist else title,
                 image=MediaItemImage(
                     type=ImageType.THUMB,
@@ -293,6 +303,33 @@ class RadioplayerProvider(MusicProvider):
             )
             for start, artist, title, image in parse_history(events)
         ]
+
+    async def _song(self, item_id: str, start: str) -> list[MediaItemType | ItemMapping]:
+        """
+        Return the tracks that the music providers find for a song, then the station.
+
+        The station comes last so a song always offers something to play, also when the
+        search finds nothing or the song is gone from the feed.
+
+        :param item_id: The id of the station.
+        :param start: The key of the song in the feed: its start time, as a rule.
+        """
+        ids = parse_item_id(item_id)
+        events = await self._events(*ids) if ids else None
+        found: list[MediaItemType | ItemMapping] = []
+        for song_start, artist, title, _image in parse_history(events):
+            # a title alone finds too many other songs
+            if song_start == start and artist:
+                result = await self.mass.music.search(
+                    f"{artist} {title}", [MediaType.TRACK], limit=SONG_SEARCH_LIMIT
+                )
+                found.extend(result.tracks)
+                break
+        stations = await self._known_stations()
+        if item_id in stations:
+            name, image = stations[item_id]
+            found.append(self._radio(item_id, name, image.path if image else None))
+        return found
 
     async def get_stream_details(self, item_id: str, media_type: MediaType) -> StreamDetails:
         """
