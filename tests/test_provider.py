@@ -278,13 +278,14 @@ async def test_all_stations_unreachable(mass: MusicAssistant) -> None:
     assert len(await provider.browse(f"{provider.instance_id}://")) == 4
 
     # an error that came with a 200 is no list, and is not kept
-    for junk in ({"error": "busy"}, {}, [], "x"):
+    junks: list[Any] = [{"error": "busy"}, {}, [], "x"]
+    for junk in junks:
 
         async def answer(_url: str, _params: dict[str, str] | None = None, junk: Any = junk) -> Any:
             return junk
 
         provider._fetch = answer  # type: ignore[attr-defined]  # noqa: SLF001
-        assert await provider._services("056") is None  # noqa: SLF001
+        assert await provider._services("056") is None  # type: ignore[attr-defined]  # noqa: SLF001
 
 
 async def test_all_stations_countries(mass: MusicAssistant) -> None:
