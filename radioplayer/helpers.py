@@ -198,7 +198,8 @@ def parse_services(
     Return the stations of a directory by first letter: item id, name, logo and slogan.
 
     The directory's own letters are not used: Belgium has all its stations under one key.
-    A name that does not start with a letter goes under ``#``.
+    A name that does not start with a letter goes under ``#``; a letter outside A-Z, such as
+    Ø, has its own key.
 
     :param answer: The answer of the directory, a list of stations per key.
     :param country: The numeric code of the country.
@@ -216,10 +217,28 @@ def parse_services(
                 slogan = " ".join(_text(item.get("shortDescription")).split()) or None
                 found.setdefault(item_id, (item_id, name, logo, slogan))
     letters: dict[str, list[tuple[str, str, str | None, str | None]]] = {}
-    for station in sorted(found.values(), key=lambda s: s[1].lower()):
-        first = unicodedata.normalize("NFKD", station[1])[0].upper()
-        letters.setdefault(first if "A" <= first <= "Z" else "#", []).append(station)
+    for station in sorted(found.values(), key=lambda s: _fold(s[1])):
+        first = _fold(station[1])[0]
+        letters.setdefault(first.upper() if first.isalpha() else "#", []).append(station)
     return dict(sorted(letters.items(), key=lambda kv: (kv[0] == "#", kv[0])))
+
+
+def station_prefix(name: str) -> str:
+    """
+    Return the first two characters of a name, as the second level of a crowded letter.
+
+    Accents are dropped as for the letters; a character that is no letter or digit becomes
+    ``_``, as a ``/`` would split the path.
+
+    :param name: The name of a station.
+    """
+    return "".join(c.upper() if c.isalnum() else "_" for c in _fold(name)[:2])
+
+
+def _fold(name: str) -> str:
+    """Return a name without accents or capitals, to group and sort it."""
+    decomposed = unicodedata.normalize("NFKD", name).casefold()
+    return "".join(c for c in decomposed if not unicodedata.combining(c))
 
 
 def parse_service(service: Any) -> tuple[str, str | None, str | None] | None:

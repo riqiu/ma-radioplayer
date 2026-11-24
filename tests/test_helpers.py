@@ -234,6 +234,7 @@ def test_services() -> None:
             {"rpId": "9", "serviceName": "  Écho "},
             {"rpId": "5067", "serviceName": "Willy again"},
             {"rpId": "x", "serviceName": "No id"},
+            {"rpId": "6", "serviceName": "Østerlig"},
             {"rpId": "7", "serviceName": ""},
             "junk",
         ]
@@ -242,9 +243,14 @@ def test_services() -> None:
         "D": [("056-5010", "De Tijdloze", None, None)],
         "E": [("056-9", "Écho", None, None)],
         "W": [("056-5067", "Willy", "https://logo.example/w.png", "Hits all day")],
+        "Ø": [("056-6", "Østerlig", None, None)],
         "#": [("056-138", "10 FM", None, None)],
     }
     assert parse_services(None, "056") == {}
+    assert station_prefix("Radio 1") == "RA"
+    assert station_prefix("Écho") == "EC"
+    assert station_prefix("A/B") == "A_"
+    assert station_prefix("X") == "X"
 
 
 def test_service() -> None:

@@ -38,7 +38,11 @@ listed by first letter (names that start with a digit or a symbol are under **#*
 play or can be added to the library like a station found by search. With several countries
 there is a folder per country first. The lists come from the Radioplayer directory of each
 country and are kept for a day. That directory is Radioplayer's public list and may miss
-some stations, which a search still finds.
+some stations, which a search still finds. A letter with more than 150 stations opens
+into folders by the first two characters of the name (the **R** of Germany, for instance
+holds many names that start with Radio). Many Belgian entries have no logo in the directory;
+the large logo shows once the station is played or added to the library, as Music Assistant
+then asks Radioplayer for the station itself. Without a picked country the folder is hidden.
 
 ## Install
 

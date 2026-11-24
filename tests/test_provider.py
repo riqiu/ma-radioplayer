@@ -152,13 +152,9 @@ async def test_recently_played(mass: MusicAssistant) -> None:
     provider._events = events  # type: ignore[attr-defined]  # noqa: SLF001
 
     root = await provider.browse(f"{provider.instance_id}://")
-    assert [item.name for item in root] == [
-        "Willy",
-        "Studio Brussel",
-        "Recently played",
-        "All stations",
-    ]
-    recent = root[-2]
+    # no country picked: no All stations
+    assert [item.name for item in root] == ["Willy", "Studio Brussel", "Recently played"]
+    recent = root[-1]
     assert isinstance(recent, BrowseFolder)
 
     stations = await provider.browse(recent.path)
@@ -232,11 +228,63 @@ async def test_all_stations(mass: MusicAssistant) -> None:
     stations = await one.browse(letters[1].path)
     assert [(s.item_id, s.name) for s in stations] == [("056-5067", "Willy")]
     assert isinstance(stations[0], Radio)
-    assert stations[0].image is not None
+    # Willy is in the settings: it keeps its own logo (none), not the directory's
+    assert stations[0].image is None
     assert stations[0].metadata.description == "Hits"
+    assert [item.item_id for item in letters] == ["D", "W", "other"]
     other = await one.browse(letters[-1].path)
     assert [s.item_id for s in other] == ["056-138"]
     assert await one.browse(f"{one.instance_id}://all/Q") == []
+    # a lowercase letter works, a country that is not picked or a second level does not
+    assert [s.item_id for s in await one.browse(f"{one.instance_id}://all/w")] == ["056-5067"]
+    assert await one.browse(f"{one.instance_id}://all/056/x") == []
+    assert await one.browse(f"{one.instance_id}://all/W/WI") == []
+
+
+async def test_all_stations_crowded(mass: MusicAssistant) -> None:
+    """A letter with more than 150 stations opens into the first two characters."""
+    crowded = [{"rpId": str(1000 + n), "serviceName": f"Radio {n}"} for n in range(151)]
+    crowded += [{"rpId": "1", "serviceName": "Rádio X"}, {"rpId": "2", "serviceName": "Øst"}]
+    few = [{"rpId": str(2000 + n), "serviceName": f"Test {n}"} for n in range(150)]
+
+    async def fetch(_url: str, _params: dict[str, str] | None = None) -> Any:
+        return {"x": crowded + few}
+
+    provider = await _provider(mass, ["056", "276"])
+    provider._fetch = fetch  # type: ignore[attr-defined]  # noqa: SLF001
+    base = f"{provider.instance_id}://all/056"
+    letters = _folders(await provider.browse(base))
+    assert [item.name for item in letters] == ["R", "T", "Ø"]
+    assert [item.item_id for item in letters][0] == "056/R"
+    second = _folders(await provider.browse(letters[0].path))
+    assert [item.name for item in second] == ["RA"]
+    assert second[0].path == f"{base}/R/RA"
+    stations = await provider.browse(second[0].path)
+    assert len(stations) == 152
+    # 150 stations stay flat
+    assert len(await provider.browse(letters[1].path)) == 150
+    assert await provider.browse(f"{base}/R/ZZ") == []
+
+
+async def test_all_stations_unreachable(mass: MusicAssistant) -> None:
+    """When the directory can't be reached the folder is empty and the root still works."""
+
+    async def fetch(_url: str, _params: dict[str, str] | None = None) -> Any:
+        raise ProviderUnavailableError("down")
+
+    provider = await _provider(mass, ["056"])
+    provider._fetch = fetch  # type: ignore[attr-defined]  # noqa: SLF001
+    assert await provider.browse(f"{provider.instance_id}://all") == []
+    assert len(await provider.browse(f"{provider.instance_id}://")) == 4
+
+    # an error that came with a 200 is no list, and is not kept
+    for junk in ({"error": "busy"}, {}, [], "x"):
+
+        async def answer(_url: str, _params: dict[str, str] | None = None, junk: Any = junk) -> Any:
+            return junk
+
+        provider._fetch = answer  # type: ignore[attr-defined]  # noqa: SLF001
+        assert await provider._services("056") is None  # noqa: SLF001
 
 
 async def test_all_stations_countries(mass: MusicAssistant) -> None:

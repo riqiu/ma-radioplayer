@@ -63,6 +63,7 @@ from .helpers import (
     parse_search,
     parse_service,
     parse_services,
+    station_prefix,
     parse_stations,
     poll_seconds,
     split_stream_title,
@@ -85,6 +86,8 @@ CONF_COUNTRIES: Final[str] = "countries"
 CONF_STATIONS: Final[str] = "stations"
 RECENT_FOLDER: Final[str] = "recent"
 ALL_FOLDER: Final[str] = "all"
+# a letter of All stations with more stations opens into the first two characters
+CROWDED_LETTER: Final[int] = 150
 # how many tracks a song of Recently played offers from the user's music providers
 SONG_SEARCH_LIMIT: Final[int] = 5
 # the search answer when no country is picked
@@ -250,7 +253,11 @@ class RadioplayerProvider(MusicProvider):
                     for station in self._stations.values()
                 ),
                 self._folder(RECENT_FOLDER, recent, "Recently played"),
-                self._folder(ALL_FOLDER, f"{prefix}://{ALL_FOLDER}", "All stations"),
+                *(
+                    [self._folder(ALL_FOLDER, f"{prefix}://{ALL_FOLDER}", "All stations")]
+                    if self._countries
+                    else []
+                ),
             ]
         if parts[0] == ALL_FOLDER:
             return await self._all_stations(f"{prefix}://{ALL_FOLDER}", parts[1:])
@@ -282,23 +289,41 @@ class RadioplayerProvider(MusicProvider):
         :param path: The path of All stations, or of the country below it.
         :param parts: The rest of the path: the country (when several), then the letter.
         """
+
+        def folder(rel: str, name: str) -> BrowseFolder:
+            return self._folder(rel, f"{path}/{rel}", name)
+
+        # rel is the path below All stations, and the id of the folder
+        rel = ""
         if len(self._countries) == 1:
             country = self._countries[0]
         elif not parts:
-            return [self._folder(c, f"{path}/{c}", COUNTRIES[c][1]) for c in self._countries]
+            return [folder(c, COUNTRIES[c][1]) for c in self._countries]
         elif parts[0] in self._countries:
-            country, parts, path = parts[0], parts[1:], f"{path}/{parts[0]}"
+            country, parts, rel = parts[0], parts[1:], f"{parts[0]}/"
         else:
             return []
         letters = parse_services(await self._services(country), country)
         if not parts:
-            return [
-                # the folder of # is called other, as a # would end a path
-                self._folder(letter, f"{path}/{'other' if letter == '#' else letter}", letter)
-                for letter in letters
-            ]
+            # the folder of # is called other, as a # would end a path
+            return [folder(f"{rel}{'other' if k == '#' else k}", k) for k in letters]
         letter = "#" if parts[0] == "other" else parts[0].upper()
-        return [self._radio(*station) for station in letters.get(letter, [])]
+        stations = letters.get(letter, [])
+        if len(stations) > CROWDED_LETTER:
+            if len(parts) == 1:
+                names = dict.fromkeys(station_prefix(station[1]) for station in stations)
+                return [folder(f"{rel}{parts[0]}/{name}", name) for name in names]
+            stations = [s for s in stations if station_prefix(s[1]) == parts[1].upper()]
+        elif len(parts) > 1:
+            return []
+        return [self._hit(*station) for station in stations]
+
+    def _hit(self, item_id: str, name: str, logo: str | None, slogan: str | None) -> Radio:
+        """Return the radio item of a listed station, as in the settings when it is there."""
+        station = self._stations.get(item_id)
+        if station:
+            name, logo = station.name, station.logo_url
+        return self._radio(item_id, name, logo, slogan)
 
     async def _known_stations(self) -> dict[str, tuple[str, MediaItemImage | None]]:
         """Return the name and logo of the stations of the settings and of the library."""
@@ -461,9 +486,17 @@ class RadioplayerProvider(MusicProvider):
     async def _services(self, country: str) -> Any:
         """Return all stations of a country's directory, or None when it fails."""
         try:
-            return await self._fetch(SERVICES_URL.format(directory=COUNTRIES[country][0]))
+            answer = await self._fetch(SERVICES_URL.format(directory=COUNTRIES[country][0]))
         except ProviderUnavailableError:
             return None
+        # only a real list is kept for a day, never an error that came with a 200
+        if (
+            isinstance(answer, dict)
+            and answer
+            and all(isinstance(v, list) for v in answer.values())
+        ):
+            return answer
+        return None
 
     async def _service(self, country: str, rp_id: str) -> Any:
         """Return the entry of a station in the directory, or None when it fails."""
