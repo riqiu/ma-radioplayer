@@ -223,16 +223,40 @@ def parse_services(
     return dict(sorted(letters.items(), key=lambda kv: (kv[0] == "#", kv[0])))
 
 
-def station_prefix(name: str) -> str:
+def station_prefix(name: str, length: int = 2) -> str:
     """
-    Return the first two characters of a name, as the second level of a crowded letter.
+    Return the first characters of a name, as a folder of a crowded letter.
 
     Accents are dropped as for the letters; a character that is no letter or digit becomes
     ``_``, as a ``/`` would split the path.
 
     :param name: The name of a station.
+    :param length: How many characters to keep.
     """
-    return "".join(c.upper() if c.isalnum() else "_" for c in _fold(name)[:2])
+    return "".join(c.upper() if c.isalnum() else "_" for c in _fold(name)[:length])
+
+
+def split_stations(
+    stations: list[tuple[str, str, str | None, str | None]], length: int
+) -> dict[str, list[tuple[str, str, str | None, str | None]]] | None:
+    """
+    Return the stations of a crowded folder by name prefix, or None when they can't be split.
+
+    The prefix is one character longer than the folder's, and longer still while all stations
+    share it, so a folder never has a single child. The split ends when the names end.
+
+    :param stations: The stations of the folder.
+    :param length: The length of the prefix of the folder.
+    """
+    while True:
+        length += 1
+        groups: dict[str, list[tuple[str, str, str | None, str | None]]] = {}
+        for station in stations:
+            groups.setdefault(station_prefix(station[1], length), []).append(station)
+        if len(groups) > 1:
+            return groups
+        if len(next(iter(groups))) < length:
+            return None
 
 
 def _fold(name: str) -> str:

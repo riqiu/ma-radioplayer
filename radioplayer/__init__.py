@@ -66,6 +66,7 @@ from .helpers import (
     parse_stations,
     poll_seconds,
     split_stream_title,
+    split_stations,
     station_prefix,
 )
 
@@ -309,13 +310,16 @@ class RadioplayerProvider(MusicProvider):
             return [folder(f"{rel}{'other' if k == '#' else k}", k) for k in letters]
         letter = "#" if parts[0] == "other" else parts[0].upper()
         stations = letters.get(letter, [])
-        if len(stations) > CROWDED_LETTER:
-            if len(parts) == 1:
-                names = dict.fromkeys(station_prefix(station[1]) for station in stations)
-                return [folder(f"{rel}{parts[0]}/{name}", name) for name in names]
-            stations = [s for s in stations if station_prefix(s[1]) == parts[1].upper()]
-        elif len(parts) > 1:
-            return []
+        if len(parts) > 1:
+            # a folder below a letter only exists when the letter is crowded
+            if len(stations) <= CROWDED_LETTER:
+                return []
+            prefix = parts[-1].upper()
+            stations = [s for s in stations if station_prefix(s[1], len(prefix)) == prefix]
+        if len(stations) > CROWDED_LETTER and (
+            groups := split_stations(stations, len(parts[-1]) if len(parts) > 1 else 1)
+        ):
+            return [folder(f"{rel}{'/'.join(parts)}/{name}", name) for name in groups]
         return [self._hit(*station) for station in stations]
 
     def _hit(self, item_id: str, name: str, logo: str | None, slogan: str | None) -> Radio:

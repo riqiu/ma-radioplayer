@@ -242,10 +242,10 @@ async def test_all_stations(mass: MusicAssistant) -> None:
 
 
 async def test_all_stations_crowded(mass: MusicAssistant) -> None:
-    """A letter with more than 150 stations opens into the first two characters."""
-    crowded = [{"rpId": str(1000 + n), "serviceName": f"Radio {n}"} for n in range(151)]
+    """A folder with more than 150 stations splits by longer prefixes until none is crowded."""
+    crowded = [{"rpId": str(1000 + n), "serviceName": f"Radio {n}"} for n in range(1500)]
     crowded += [{"rpId": "1", "serviceName": "Rádio X"}, {"rpId": "2", "serviceName": "Øst"}]
-    few = [{"rpId": str(2000 + n), "serviceName": f"Test {n}"} for n in range(150)]
+    few = [{"rpId": str(5000 + n), "serviceName": f"Test {n}"} for n in range(150)]
 
     async def fetch(_url: str, _params: dict[str, str] | None = None) -> Any:
         return {"x": crowded + few}
@@ -256,12 +256,28 @@ async def test_all_stations_crowded(mass: MusicAssistant) -> None:
     letters = _folders(await provider.browse(base))
     assert [item.name for item in letters] == ["R", "T", "Ø"]
     assert letters[0].item_id == "056/R"
+    # Radio... has one child at RA, RAD, ...: the folders start where the names differ
     second = _folders(await provider.browse(letters[0].path))
-    assert [item.name for item in second] == ["RA"]
-    assert second[0].path == f"{base}/R/RA"
-    stations = await provider.browse(second[0].path)
-    assert len(stations) == 152
-    # 150 stations stay flat
+    assert [item.name for item in second] == [f"RADIO_{c}" for c in "0123456789X"]
+    assert second[0].path == f"{base}/R/RADIO_0"
+
+    sizes: list[int] = []
+    depths: list[int] = []
+
+    async def walk(path: str, depth: int) -> None:
+        items = await provider.browse(path)
+        if folders := _folders(items):
+            for folder in folders:
+                await walk(folder.path, depth + 1)
+            return
+        sizes.append(len(items))
+        depths.append(depth)
+
+    await walk(letters[0].path, 1)
+    assert sum(sizes) == 1501
+    assert max(sizes) <= 150
+    assert max(depths) == 3
+    # 150 stations stay flat, and a folder that does not exist is empty
     assert len(await provider.browse(letters[1].path)) == 150
     assert await provider.browse(f"{base}/R/ZZ") == []
 
