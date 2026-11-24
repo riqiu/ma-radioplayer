@@ -169,16 +169,17 @@ async def test_recently_played(mass: MusicAssistant) -> None:
     # no music providers in tests: the server's search is a stand-in
     mass.music.search = search  # type: ignore[assignment,method-assign]
 
+    newest, oldest = [song for song in songs if isinstance(song, BrowseFolder)]
     # a song opens what the music providers find for it, then the station
-    assert songs[1].path == f"{willy.path}/1"
-    found = await provider.browse(songs[1].path)
+    assert oldest.path == f"{willy.path}/1"
+    found = await provider.browse(oldest.path)
     assert searched == [("OLD Old Song", [MediaType.TRACK], 5)]
     assert found[0] == "the track"
     assert isinstance(found[1], Radio)
     assert found[1].item_id == "056-5067"
     # a song without a start time opens as well, and never the list it is in
-    assert songs[0].path.rsplit("/", 1)[1].startswith("x")
-    found = await provider.browse(songs[0].path)
+    assert newest.path.rsplit("/", 1)[1].startswith("x")
+    found = await provider.browse(newest.path)
     assert searched[-1] == ("NOORDKAAP Arme Joe", [MediaType.TRACK], 5)
     assert found[0] == "the track"
     # a song gone from the feed still offers the station
