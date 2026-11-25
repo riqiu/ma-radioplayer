@@ -54,6 +54,7 @@ from music_assistant.models.music_provider import MusicProvider
 
 from .helpers import (
     COUNTRIES,
+    LANGUAGES,
     Station,
     default_countries,
     parse_history,
@@ -65,6 +66,7 @@ from .helpers import (
     parse_services,
     parse_stations,
     poll_seconds,
+    service_languages,
     split_stations,
     split_stream_title,
     station_prefix,
@@ -87,7 +89,7 @@ CONF_COUNTRIES: Final[str] = "countries"
 CONF_STATIONS: Final[str] = "stations"
 RECENT_FOLDER: Final[str] = "recent"
 ALL_FOLDER: Final[str] = "all"
-# a letter of All stations with more stations opens into the first two characters
+# a folder of All stations with more stations opens into folders by longer name prefixes
 CROWDED_LETTER: Final[int] = 150
 # how many tracks a song of Recently played offers from the user's music providers
 SONG_SEARCH_LIMIT: Final[int] = 5
@@ -239,7 +241,7 @@ class RadioplayerProvider(MusicProvider):
 
         The root has the stations of the settings, a folder Recently played, with a folder
         per station of the settings or the library, which lists its last songs from the feed,
-        and a folder All stations, with the stations of the picked countries by first letter.
+        and a folder All stations: every country, by language and first letter.
         A song opens the tracks that the music providers find for it, and the station.
 
         :param path: The path to browse, such as ``radioplayer://recent/056-5067``.
@@ -254,11 +256,7 @@ class RadioplayerProvider(MusicProvider):
                     for station in self._stations.values()
                 ),
                 self._folder(RECENT_FOLDER, recent, "Recently played"),
-                *(
-                    [self._folder(ALL_FOLDER, f"{prefix}://{ALL_FOLDER}", "All stations")]
-                    if self._countries
-                    else []
-                ),
+                self._folder(ALL_FOLDER, f"{prefix}://{ALL_FOLDER}", "All stations"),
             ]
         if parts[0] == ALL_FOLDER:
             return await self._all_stations(f"{prefix}://{ALL_FOLDER}", parts[1:])
@@ -285,26 +283,54 @@ class RadioplayerProvider(MusicProvider):
 
     async def _all_stations(self, path: str, parts: list[str]) -> list[BrowseFolder | Radio]:
         """
-        Return a level of All stations: the countries when several are picked, then the letters.
+        Return a level of All stations: the countries, the languages, then the letters.
 
-        :param path: The path of All stations, or of the country below it.
-        :param parts: The rest of the path: the country (when several), then the letter.
+        Every country is listed, those of the settings first; a country whose stations
+        speak several languages has a folder per language before the letters.
+
+        :param path: The path of All stations.
+        :param parts: The rest of the path: the country, the language (when several), the letter.
         """
 
         def folder(rel: str, name: str) -> BrowseFolder:
             return self._folder(rel, f"{path}/{rel}", name)
 
-        # rel is the path below All stations, and the id of the folder
-        rel = ""
-        if len(self._countries) == 1:
-            country = self._countries[0]
-        elif not parts:
-            return [folder(c, COUNTRIES[c][1]) for c in self._countries]
-        elif parts[0] in self._countries:
-            country, parts, rel = parts[0], parts[1:], f"{parts[0]}/"
-        else:
+        if not parts:
+            others = sorted(set(COUNTRIES) - set(self._countries), key=lambda c: COUNTRIES[c][1])
+            return [folder(c, COUNTRIES[c][1]) for c in [*self._countries, *others]]
+        if parts[0] not in COUNTRIES:
             return []
-        letters = parse_services(await self._services(country), country)
+        # rel is the path below All stations, and the id of the folder
+        country, parts, rel = parts[0], parts[1:], f"{parts[0]}/"
+        answer = await self._services(country)
+        language = None
+        if len(languages := service_languages(answer)) > 1:
+            if not parts:
+                return [folder(f"{rel}{lang}", LANGUAGES.get(lang, lang)) for lang in languages]
+            if parts[0] not in languages:
+                return []
+            language, parts, rel = parts[0], parts[1:], f"{rel}{parts[0]}/"
+        return self._letters(path, rel, parts, parse_services(answer, country, language))
+
+    def _letters(
+        self,
+        path: str,
+        rel: str,
+        parts: list[str],
+        letters: dict[str, list[tuple[str, str, str | None, str | None]]],
+    ) -> list[BrowseFolder | Radio]:
+        """
+        Return a level of a country (or language) of All stations: its letters, or a letter.
+
+        :param path: The path of All stations.
+        :param rel: The path of the country (and language) below it, ending in a slash.
+        :param parts: The rest of the path: the letter, then the prefixes of a crowded letter.
+        :param letters: The stations of the country (and language) by first letter.
+        """
+
+        def folder(rel: str, name: str) -> BrowseFolder:
+            return self._folder(rel, f"{path}/{rel}", name)
+
         if not parts:
             # the folder of # is called other, as a # would end a path
             return [folder(f"{rel}{'other' if k == '#' else k}", k) for k in letters]

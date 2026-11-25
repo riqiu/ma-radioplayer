@@ -33,17 +33,20 @@ found for another.
 
 ## All stations
 
-Under **Browse > Radioplayer > All stations**, the stations of the picked countries are
-listed by first letter (names that start with a digit or a symbol are under **#**), and
-play or can be added to the library like a station found by search. With several countries
-there is a folder per country first. The lists come from the Radioplayer directory of each
-country and are kept for a day. That directory is Radioplayer's public list and may miss
+Under **Browse > Radioplayer > All stations**, every country Radioplayer serves has a
+folder: the countries picked in the settings first, then the others by name. Inside a
+country the stations are listed by first letter (names that start with a digit or a symbol
+are under **#**), and play or can be added to the library like a station found by search.
+A country with stations in several languages, such as Belgium (Dutch, French) or
+Switzerland, has a folder per language first, the most used language on top. The lists
+come from the Radioplayer directory of each country, fetched when the country is first
+opened, and are kept for a day. That directory is Radioplayer's public list and may miss
 some stations, which a search still finds. A letter with more than 150 stations opens into folders by the first characters of the
 name, longer until no folder has more than 150 stations; a folder that would have a single
 child skips ahead to where the names differ (for instance the Radio... stations of Germany
 under **R**). Many Belgian entries have no logo in the directory;
 the large logo shows once the station is played or added to the library, as Music Assistant
-then asks Radioplayer for the station itself. Without a picked country the folder is hidden.
+then asks Radioplayer for the station itself.
 
 ## Install
 

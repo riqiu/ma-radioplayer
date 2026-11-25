@@ -152,9 +152,10 @@ async def test_recently_played(mass: MusicAssistant) -> None:
     provider._events = events  # type: ignore[attr-defined]  # noqa: SLF001
 
     root = await provider.browse(f"{provider.instance_id}://")
-    # no country picked: no All stations
-    assert [item.name for item in root] == ["Willy", "Studio Brussel", "Recently played"]
-    recent = root[-1]
+    # no country picked: All stations still lists every country
+    names = [item.name for item in root]
+    assert names == ["Willy", "Studio Brussel", "Recently played", "All stations"]
+    recent = root[-2]
     assert isinstance(recent, BrowseFolder)
 
     stations = await provider.browse(recent.path)
@@ -206,7 +207,7 @@ def _folders(items: Iterable[Any]) -> list[BrowseFolder]:
 
 
 async def test_all_stations(mass: MusicAssistant) -> None:
-    """All stations has the letters of one country, or the countries first when there are several."""
+    """All stations lists every country, the picked one first, then the letters of a country."""
     services = {
         "undefined": [
             {"rpId": "5067", "serviceName": "Willy", "imageUrl": BIG, "shortDescription": "Hits"},
@@ -222,23 +223,63 @@ async def test_all_stations(mass: MusicAssistant) -> None:
     one._fetch = fetch  # type: ignore[attr-defined]  # noqa: SLF001
     root = await one.browse(f"{one.instance_id}://")
     assert root[-1].name == "All stations"
-    letters = _folders(await one.browse(_folders(root)[-1].path))
+    countries = _folders(await one.browse(_folders(root)[-1].path))
+    assert [c.name for c in countries[:3]] == ["Belgium", "Austria", "Canada"]
+    assert len(countries) == 13
+    base = f"{one.instance_id}://all/056"
+    letters = _folders(await one.browse(countries[0].path))
     assert [item.name for item in letters] == ["D", "W", "#"]
-    assert [item.path for item in letters][-1] == f"{one.instance_id}://all/other"
+    assert [item.path for item in letters][-1] == f"{base}/other"
     stations = await one.browse(letters[1].path)
     assert [(s.item_id, s.name) for s in stations] == [("056-5067", "Willy")]
     assert isinstance(stations[0], Radio)
     # Willy is in the settings: it keeps its own logo (none), not the directory's
     assert stations[0].image is None
     assert stations[0].metadata.description == "Hits"
-    assert [item.item_id for item in letters] == ["D", "W", "other"]
+    assert [item.item_id for item in letters] == ["056/D", "056/W", "056/other"]
     other = await one.browse(letters[-1].path)
     assert [s.item_id for s in other] == ["056-138"]
-    assert await one.browse(f"{one.instance_id}://all/Q") == []
-    # a lowercase letter works, a country that is not picked or a second level does not
-    assert [s.item_id for s in await one.browse(f"{one.instance_id}://all/w")] == ["056-5067"]
-    assert await one.browse(f"{one.instance_id}://all/056/x") == []
-    assert await one.browse(f"{one.instance_id}://all/W/WI") == []
+    assert await one.browse(f"{base}/Q") == []
+    # a lowercase letter works; a country unknown, or a second level of a calm letter, does not
+    assert [s.item_id for s in await one.browse(f"{base}/w")] == ["056-5067"]
+    assert await one.browse(f"{one.instance_id}://all/999") == []
+    assert await one.browse(f"{one.instance_id}://all/W") == []
+    assert await one.browse(f"{base}/W/WI") == []
+    # a country that is not picked lists its stations as well
+    assert [s.item_id for s in await one.browse(f"{one.instance_id}://all/276/w")] == ["276-5067"]
+
+
+async def test_all_stations_languages(mass: MusicAssistant) -> None:
+    """A country with stations in several languages has a folder per language, most used first."""
+    services = {
+        "undefined": [
+            {"rpId": "5067", "serviceName": "Willy", "language": "nl"},
+            {"rpId": "5010", "serviceName": "De Tijdloze", "language": "nl"},
+            {"rpId": "6000", "serviceName": "Bel RTL", "language": "fr"},
+            {"rpId": "7000", "serviceName": "Radio Xyz", "language": "xx"},
+        ]
+    }
+
+    async def fetch(_url: str, _params: dict[str, str] | None = None) -> Any:
+        return services
+
+    provider = await _provider(mass, ["056"])
+    provider._fetch = fetch  # type: ignore[attr-defined]  # noqa: SLF001
+    base = f"{provider.instance_id}://all/056"
+    languages = _folders(await provider.browse(base))
+    assert [(f.item_id, f.name) for f in languages] == [
+        ("056/nl", "Dutch"),
+        ("056/fr", "French"),
+        ("056/xx", "xx"),
+    ]
+    letters = _folders(await provider.browse(languages[0].path))
+    assert [(f.item_id, f.name) for f in letters] == [("056/nl/D", "D"), ("056/nl/W", "W")]
+    assert [s.item_id for s in await provider.browse(letters[1].path)] == ["056-5067"]
+    assert [s.item_id for s in await provider.browse(f"{base}/fr/b")] == ["056-6000"]
+    # a letter of another language, or a language the country lacks, is empty
+    assert await provider.browse(f"{base}/fr/W") == []
+    assert await provider.browse(f"{base}/de") == []
+    assert await provider.browse(f"{base}/W") == []
 
 
 async def test_all_stations_crowded(mass: MusicAssistant) -> None:
@@ -281,6 +322,37 @@ async def test_all_stations_crowded(mass: MusicAssistant) -> None:
     assert await provider.browse(f"{base}/R/ZZ") == []
 
 
+async def test_all_stations_crowded_language(mass: MusicAssistant) -> None:
+    """Under a language folder a crowded letter splits the same way."""
+    crowded = [
+        {"rpId": str(1000 + n), "serviceName": f"Radio {n}", "language": "nl"} for n in range(1500)
+    ]
+    few = [
+        {"rpId": str(5000 + n), "serviceName": f"Test {n}", "language": "fr"} for n in range(150)
+    ]
+
+    async def fetch(_url: str, _params: dict[str, str] | None = None) -> Any:
+        return {"x": crowded + few}
+
+    provider = await _provider(mass, ["056"])
+    provider._fetch = fetch  # type: ignore[attr-defined]  # noqa: SLF001
+    base = f"{provider.instance_id}://all/056"
+    assert [f.item_id for f in _folders(await provider.browse(base))] == ["056/nl", "056/fr"]
+    second = _folders(await provider.browse(f"{base}/nl/R"))
+    assert second[0].path == f"{base}/nl/R/RADIO_0"
+    assert second[0].item_id == "056/nl/R/RADIO_0"
+
+    async def count(path: str) -> int:
+        items = await provider.browse(path)
+        radios = [item for item in items if not isinstance(item, BrowseFolder)]
+        assert len(radios) <= 150
+        return len(radios) + sum([await count(f.path) for f in _folders(items)])
+
+    # every Radio station of Dutch is reached once, the French ones stay apart
+    assert await count(f"{base}/nl/R") == 1500
+    assert len(await provider.browse(f"{base}/fr/T")) == 150
+
+
 async def test_all_stations_unreachable(mass: MusicAssistant) -> None:
     """When the directory can't be reached the folder is empty and the root still works."""
 
@@ -289,7 +361,7 @@ async def test_all_stations_unreachable(mass: MusicAssistant) -> None:
 
     provider = await _provider(mass, ["056"])
     provider._fetch = fetch  # type: ignore[attr-defined]  # noqa: SLF001
-    assert await provider.browse(f"{provider.instance_id}://all") == []
+    assert await provider.browse(f"{provider.instance_id}://all/056") == []
     assert len(await provider.browse(f"{provider.instance_id}://")) == 4
 
     # an error that came with a 200 is no list, and is not kept
@@ -304,16 +376,21 @@ async def test_all_stations_unreachable(mass: MusicAssistant) -> None:
 
 
 async def test_all_stations_countries(mass: MusicAssistant) -> None:
-    """With several countries All stations lists the countries first."""
+    """The picked countries come first, in the order of the settings, then the rest by name."""
 
     async def fetch(_url: str, _params: dict[str, str] | None = None) -> Any:
         return {"d": [{"rpId": "5010", "serviceName": "De Tijdloze"}]}
 
-    several = await _provider(mass, ["056", "276"])
+    several = await _provider(mass, ["276", "056"])
     several._fetch = fetch  # type: ignore[attr-defined]  # noqa: SLF001
     countries = _folders(await several.browse(f"{several.instance_id}://all"))
-    assert [(c.item_id, c.name) for c in countries] == [("056", "Belgium"), ("276", "Germany")]
-    letters = _folders(await several.browse(countries[1].path))
+    assert [(c.item_id, c.name) for c in countries[:3]] == [
+        ("276", "Germany"),
+        ("056", "Belgium"),
+        ("040", "Austria"),
+    ]
+    assert countries[-1].name == "United Kingdom"
+    letters = _folders(await several.browse(countries[0].path))
     assert letters[0].path == f"{several.instance_id}://all/276/D"
     stations = await several.browse(letters[0].path)
     assert [s.item_id for s in stations] == ["276-5010"]

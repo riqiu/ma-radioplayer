@@ -19,6 +19,7 @@ from radioplayer.helpers import (
     parse_services,
     parse_stations,
     poll_seconds,
+    service_languages,
     split_stream_title,
     station_prefix,
 )
@@ -252,6 +253,35 @@ def test_services() -> None:
     assert station_prefix("Écho") == "EC"
     assert station_prefix("A/B") == "A_"
     assert station_prefix("X") == "X"
+    assert service_languages(answer) == []
+
+
+def test_service_languages() -> None:
+    """The languages of a directory's listed stations, most used first; none when one lacks it."""
+    answer = {
+        "a": [
+            {"rpId": "1", "serviceName": "Un", "language": "fr"},
+            {"rpId": "2", "serviceName": "Twee", "language": "NL"},
+            {"rpId": "3", "serviceName": "Drie", "language": "nl"},
+            # not listed, so not counted: a duplicate, no id, no name
+            {"rpId": "1", "serviceName": "Un again", "language": "de"},
+            {"rpId": "x", "serviceName": "No id", "language": "de"},
+            {"rpId": "9", "serviceName": "", "language": "de"},
+        ],
+        "b": ["junk"],
+    }
+    assert service_languages(answer) == ["nl", "fr"]
+    assert parse_services(answer, "056", "nl") == {
+        "D": [("056-3", "Drie", None, None)],
+        "T": [("056-2", "Twee", None, None)],
+    }
+    assert parse_services(answer, "056", "de") == {}
+    assert service_languages({"a": [{"rpId": "1", "serviceName": "X"}]}) == []
+    assert service_languages(None) == []
+    # a value that is no language code (it would split the path) counts as none
+    for odd in ("fr-be", "fr/be", "#", "f"):
+        station = {"rpId": "4", "serviceName": "Vier", "language": odd}
+        assert service_languages({**answer, "c": [station]}) == []
 
 
 def test_service() -> None:
