@@ -31,6 +31,20 @@ an artist in the feed opens the station only. The tracks found are kept for a fe
 shared by all users of the server, so on a server with several users one may see tracks
 found for another.
 
+## All stations
+
+Under **Browse > Radioplayer > All stations**, the stations of the picked countries are
+listed by first letter (names that start with a digit or a symbol are under **#**), and
+play or can be added to the library like a station found by search. With several countries
+there is a folder per country first. The lists come from the Radioplayer directory of each
+country and are kept for a day. That directory is Radioplayer's public list and may miss
+some stations, which a search still finds. A letter with more than 150 stations opens into folders by the first characters of the
+name, longer until no folder has more than 150 stations; a folder that would have a single
+child skips ahead to where the names differ (for instance the Radio... stations of Germany
+under **R**). Many Belgian entries have no logo in the directory;
+the large logo shows once the station is played or added to the library, as Music Assistant
+then asks Radioplayer for the station itself. Without a picked country the folder is hidden.
+
 ## Install
 
 Install the provider from the

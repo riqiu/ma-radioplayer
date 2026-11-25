@@ -16,9 +16,11 @@ from radioplayer.helpers import (
     parse_now_playing,
     parse_search,
     parse_service,
+    parse_services,
     parse_stations,
     poll_seconds,
     split_stream_title,
+    station_prefix,
 )
 
 COVER = "https://assets.radioplayer.org/coverArt/96cd3aeaeb3c9b62f0c016f9cfa6c58d.jpg"
@@ -215,6 +217,41 @@ def test_search() -> None:
     ]
     assert parse_search({"results": []}, "056") == []
     assert parse_search(None, "056") == []
+
+
+def test_services() -> None:
+    """The directory is grouped by first letter, whatever key it uses, without broken entries."""
+    # shaped like the real answer: Belgium has one key for all its stations
+    answer = {
+        "undefined": [
+            {
+                "rpId": "5067",
+                "serviceName": "Willy",
+                "imageUrl": "https://logo.example/w.png",
+                "shortDescription": "Hits\nall day",
+            },
+            {"rpId": "5010", "serviceName": "De Tijdloze", "imageUrl": ""},
+            {"rpId": "138", "serviceName": "10 FM"},
+            {"rpId": "9", "serviceName": "  Écho "},
+            {"rpId": "5067", "serviceName": "Willy again"},
+            {"rpId": "x", "serviceName": "No id"},
+            {"rpId": "6", "serviceName": "Østerlig"},
+            {"rpId": "7", "serviceName": ""},
+            "junk",
+        ]
+    }
+    assert parse_services(answer, "056") == {
+        "D": [("056-5010", "De Tijdloze", None, None)],
+        "E": [("056-9", "Écho", None, None)],
+        "W": [("056-5067", "Willy", "https://logo.example/w.png", "Hits all day")],
+        "Ø": [("056-6", "Østerlig", None, None)],
+        "#": [("056-138", "10 FM", None, None)],
+    }
+    assert parse_services(None, "056") == {}
+    assert station_prefix("Radio 1") == "RA"
+    assert station_prefix("Écho") == "EC"
+    assert station_prefix("A/B") == "A_"
+    assert station_prefix("X") == "X"
 
 
 def test_service() -> None:

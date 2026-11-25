@@ -62,9 +62,12 @@ from .helpers import (
     parse_now_playing,
     parse_search,
     parse_service,
+    parse_services,
     parse_stations,
     poll_seconds,
+    split_stations,
     split_stream_title,
+    station_prefix,
 )
 
 if TYPE_CHECKING:
@@ -83,6 +86,9 @@ SUPPORTED_FEATURES = {
 CONF_COUNTRIES: Final[str] = "countries"
 CONF_STATIONS: Final[str] = "stations"
 RECENT_FOLDER: Final[str] = "recent"
+ALL_FOLDER: Final[str] = "all"
+# a letter of All stations with more stations opens into the first two characters
+CROWDED_LETTER: Final[int] = 150
 # how many tracks a song of Recently played offers from the user's music providers
 SONG_SEARCH_LIMIT: Final[int] = 5
 # the search answer when no country is picked
@@ -91,6 +97,7 @@ HINT: Final[str] = "Pick one or more countries in the Radioplayer settings"
 FEED_URL: Final[str] = "https://core-search.radioplayer.cloud/{country}/qp/v4/events"
 SEARCH_URL: Final[str] = "https://core-search.radioplayer.cloud/{country}/qp/v4/search"
 SERVICE_URL: Final[str] = "https://mapi.radioplayer.cloud/api/{directory}/public/service/{rp_id}"
+SERVICES_URL: Final[str] = "https://mapi.radioplayer.cloud/api/{directory}/public/services"
 REQUEST_TIMEOUT: Final[aiohttp.ClientTimeout] = aiohttp.ClientTimeout(total=10)
 # the stations of a country change seldom; a failed search is not kept
 SEARCH_CACHE_SECONDS: Final[int] = 24 * 3600
@@ -230,10 +237,10 @@ class RadioplayerProvider(MusicProvider):
         """
         Return the stations of the settings and the songs the stations played last.
 
-        The root has the stations of the settings and a folder Recently played, with a folder
-        per station of the settings or the library, which lists its last songs from the feed.
+        The root has the stations of the settings, a folder Recently played, with a folder
+        per station of the settings or the library, which lists its last songs from the feed,
+        and a folder All stations, with the stations of the picked countries by first letter.
         A song opens the tracks that the music providers find for it, and the station.
-        Radioplayer's other stations are found by search.
 
         :param path: The path to browse, such as ``radioplayer://recent/056-5067``.
         """
@@ -246,13 +253,15 @@ class RadioplayerProvider(MusicProvider):
                     self._radio(station.item_id, station.name, station.logo_url)
                     for station in self._stations.values()
                 ),
-                BrowseFolder(
-                    item_id=RECENT_FOLDER,
-                    provider=self.instance_id,
-                    path=recent,
-                    name="Recently played",
+                self._folder(RECENT_FOLDER, recent, "Recently played"),
+                *(
+                    [self._folder(ALL_FOLDER, f"{prefix}://{ALL_FOLDER}", "All stations")]
+                    if self._countries
+                    else []
                 ),
             ]
+        if parts[0] == ALL_FOLDER:
+            return await self._all_stations(f"{prefix}://{ALL_FOLDER}", parts[1:])
         if parts[0] != RECENT_FOLDER:
             return []
         if len(parts) == 1:
@@ -269,6 +278,61 @@ class RadioplayerProvider(MusicProvider):
         if len(parts) == 2:
             return await self._recently_played(parts[1], f"{recent}/{parts[1]}")
         return await self._song(parts[1], parts[2])
+
+    def _folder(self, item_id: str, path: str, name: str) -> BrowseFolder:
+        """Return a folder of the browse tree."""
+        return BrowseFolder(item_id=item_id, provider=self.instance_id, path=path, name=name)
+
+    async def _all_stations(self, path: str, parts: list[str]) -> list[BrowseFolder | Radio]:
+        """
+        Return a level of All stations: the countries when several are picked, then the letters.
+
+        :param path: The path of All stations, or of the country below it.
+        :param parts: The rest of the path: the country (when several), then the letter.
+        """
+
+        def folder(rel: str, name: str) -> BrowseFolder:
+            return self._folder(rel, f"{path}/{rel}", name)
+
+        # rel is the path below All stations, and the id of the folder
+        rel = ""
+        if len(self._countries) == 1:
+            country = self._countries[0]
+        elif not parts:
+            return [folder(c, COUNTRIES[c][1]) for c in self._countries]
+        elif parts[0] in self._countries:
+            country, parts, rel = parts[0], parts[1:], f"{parts[0]}/"
+        else:
+            return []
+        letters = parse_services(await self._services(country), country)
+        if not parts:
+            # the folder of # is called other, as a # would end a path
+            return [folder(f"{rel}{'other' if k == '#' else k}", k) for k in letters]
+        letter = "#" if parts[0] == "other" else parts[0].upper()
+        stations = letters.get(letter, [])
+        if len(parts) > 1:
+            # a folder below a letter only exists when the letter is crowded
+            if len(stations) <= CROWDED_LETTER:
+                return []
+            prefix = parts[-1].upper()
+            stations = [s for s in stations if station_prefix(s[1], len(prefix)) == prefix]
+        if len(stations) > CROWDED_LETTER and (
+            groups := split_stations(stations, len(parts[-1]) if len(parts) > 1 else 1)
+        ):
+            # a name that ends here (Radio 1 beside Radio 10) is a station, not a folder
+            longest = max(map(len, groups))
+            return [
+                *(folder(f"{rel}{'/'.join(parts)}/{k}", k) for k in groups if len(k) == longest),
+                *(self._hit(*s) for k, g in groups.items() if len(k) < longest for s in g),
+            ]
+        return [self._hit(*station) for station in stations]
+
+    def _hit(self, item_id: str, name: str, logo: str | None, slogan: str | None) -> Radio:
+        """Return the radio item of a listed station, as in the settings when it is there."""
+        station = self._stations.get(item_id)
+        if station:
+            name, logo = station.name, station.logo_url
+        return self._radio(item_id, name, logo, slogan)
 
     async def _known_stations(self) -> dict[str, tuple[str, MediaItemImage | None]]:
         """Return the name and logo of the stations of the settings and of the library."""
@@ -427,6 +491,22 @@ class RadioplayerProvider(MusicProvider):
             return answer
         return None
 
+    @use_cache(SEARCH_CACHE_SECONDS, cache_none=False)
+    async def _services(self, country: str) -> Any:
+        """Return all stations of a country's directory, or None when it fails."""
+        try:
+            answer = await self._fetch(SERVICES_URL.format(directory=COUNTRIES[country][0]))
+        except ProviderUnavailableError:
+            return None
+        # only a real list is kept for a day, never an error that came with a 200
+        if (
+            isinstance(answer, dict)
+            and answer
+            and all(isinstance(v, list) for v in answer.values())
+        ):
+            return answer
+        return None
+
     async def _service(self, country: str, rp_id: str) -> Any:
         """Return the entry of a station in the directory, or None when it fails."""
         directory = COUNTRIES[country][0]
@@ -453,8 +533,10 @@ class RadioplayerProvider(MusicProvider):
             self.logger.debug("Radioplayer request %s failed: %s", url, err)
             raise ProviderUnavailableError(f"Radioplayer can't be reached: {err}") from err
 
-    def _radio(self, item_id: str, name: str, logo_url: str | None) -> Radio:
-        """Return the radio item of a station."""
+    def _radio(
+        self, item_id: str, name: str, logo_url: str | None, description: str | None = None
+    ) -> Radio:
+        """Return the radio item of a station, with its slogan as description when it has one."""
         radio = Radio(
             item_id=item_id,
             provider=self.instance_id,
@@ -467,6 +549,7 @@ class RadioplayerProvider(MusicProvider):
                 )
             },
         )
+        radio.metadata.description = description
         if logo_url:
             radio.metadata.add_image(
                 MediaItemImage(

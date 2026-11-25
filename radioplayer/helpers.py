@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 import zlib
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -188,6 +189,80 @@ def parse_search(answer: Any, country: str) -> list[tuple[str, str, str | None]]
                 item_id = f"{country}-{rp_id}"
                 found.setdefault(item_id, (item_id, name, _text(item.get("imageUrl")) or None))
     return list(found.values())
+
+
+def parse_services(
+    answer: Any, country: str
+) -> dict[str, list[tuple[str, str, str | None, str | None]]]:
+    """
+    Return the stations of a directory by first letter: item id, name, logo and slogan.
+
+    The directory's own letters are not used: Belgium has all its stations under one key.
+    A name that does not start with a letter goes under ``#``; a letter outside A-Z, such as
+    Ø, has its own key.
+
+    :param answer: The answer of the directory, a list of stations per key.
+    :param country: The numeric code of the country.
+    """
+    found: dict[str, tuple[str, str, str | None, str | None]] = {}
+    for group in _values(answer):
+        for item in _values(group):
+            if not isinstance(item, dict):
+                continue
+            rp_id = str(item.get("rpId") or "").strip()
+            name = _text(item.get("serviceName"))
+            if rp_id.isdigit() and name:
+                item_id = f"{country}-{rp_id}"
+                logo = _text(item.get("imageUrl")) or None
+                slogan = " ".join(_text(item.get("shortDescription")).split()) or None
+                found.setdefault(item_id, (item_id, name, logo, slogan))
+    letters: dict[str, list[tuple[str, str, str | None, str | None]]] = {}
+    for station in sorted(found.values(), key=lambda s: _fold(s[1])):
+        first = _fold(station[1])[0]
+        letters.setdefault(first.upper() if first.isalpha() else "#", []).append(station)
+    return dict(sorted(letters.items(), key=lambda kv: (kv[0] == "#", kv[0])))
+
+
+def station_prefix(name: str, length: int = 2) -> str:
+    """
+    Return the first characters of a name, as a folder of a crowded letter.
+
+    Accents are dropped as for the letters; a character that is no letter or digit becomes
+    ``_``, as a ``/`` would split the path.
+
+    :param name: The name of a station.
+    :param length: How many characters to keep.
+    """
+    return "".join(c.upper() if c.isalnum() else "_" for c in _fold(name)[:length])
+
+
+def split_stations(
+    stations: list[tuple[str, str, str | None, str | None]], length: int
+) -> dict[str, list[tuple[str, str, str | None, str | None]]] | None:
+    """
+    Return the stations of a crowded folder by name prefix, or None when they can't be split.
+
+    The prefix is one character longer than the folder's, and longer still while all stations
+    share it, so a folder never has a single child. The split ends when the names end.
+
+    :param stations: The stations of the folder.
+    :param length: The length of the prefix of the folder.
+    """
+    while True:
+        length += 1
+        groups: dict[str, list[tuple[str, str, str | None, str | None]]] = {}
+        for station in stations:
+            groups.setdefault(station_prefix(station[1], length), []).append(station)
+        if len(groups) > 1:
+            return groups
+        if len(next(iter(groups))) < length:
+            return None
+
+
+def _fold(name: str) -> str:
+    """Return a name without accents or capitals, to group and sort it."""
+    decomposed = unicodedata.normalize("NFKD", name).casefold()
+    return "".join(c for c in decomposed if not unicodedata.combining(c))
 
 
 def parse_service(service: Any) -> tuple[str, str | None, str | None] | None:
