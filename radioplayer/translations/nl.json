@@ -2,7 +2,7 @@
   "config_entries": {
     "countries": {
       "label": "Landen",
-      "description": "De landen waarvan de zoekfunctie de Radioplayer-zenders vindt. Zolang je niets kiest, het land van de server (de tijdzone, anders de taal van Music Assistant), als Radioplayer daar werkt. Een gevonden zender speelt de stream die Radioplayer ervoor opgeeft.",
+      "description": "De landen waarvan de zoekfunctie de Radioplayer-zenders vindt. Zolang je niets kiest, het land van de server (de tijdzone, anders de taal van Music Assistant), als Radioplayer daar werkt. Een gevonden zender speelt de stream die Radioplayer ervoor opgeeft. Bladeren > Alle zenders toont elk land, deze eerst.",
       "options": {
         "040": "Oostenrijk",
         "056": "België",

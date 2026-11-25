@@ -321,6 +321,27 @@ async def test_all_stations_crowded(mass: MusicAssistant) -> None:
     assert len(await provider.browse(letters[1].path)) == 150
     assert await provider.browse(f"{base}/R/ZZ") == []
 
+    # under a language folder a crowded letter splits the same way
+    def speaking(stations: list[dict[str, str]], language: str) -> list[dict[str, str]]:
+        return [{**station, "language": language} for station in stations]
+
+    async def languages(_url: str, _params: dict[str, str] | None = None) -> Any:
+        return {"x": speaking(crowded, "nl") + speaking(few, "fr")}
+
+    provider = await _provider(mass, ["056"])
+    provider._fetch = languages  # type: ignore[attr-defined]  # noqa: SLF001
+    base = f"{provider.instance_id}://all/056"
+    assert [f.item_id for f in _folders(await provider.browse(base))] == ["056/nl", "056/fr"]
+    second = _folders(await provider.browse(f"{base}/nl/R"))
+    assert second[0].path == f"{base}/nl/R/RADIO_0"
+    assert second[0].item_id == "056/nl/R/RADIO_0"
+    sizes.clear()
+    depths.clear()
+    await walk(f"{base}/nl/R", 1)
+    assert sum(sizes) == 1501
+    assert max(sizes) <= 150
+    assert len(await provider.browse(f"{base}/fr/T")) == 150
+
 
 async def test_all_stations_unreachable(mass: MusicAssistant) -> None:
     """When the directory can't be reached the folder is empty and the root still works."""

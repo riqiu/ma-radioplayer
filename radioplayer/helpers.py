@@ -6,6 +6,7 @@ import json
 import re
 import unicodedata
 import zlib
+from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
@@ -40,9 +41,13 @@ LANGUAGES: dict[str, str] = {
     "fi": "Finnish",
     "fr": "French",
     "it": "Italian",
+    "lb": "Luxembourgish",
     "nl": "Dutch",
     "no": "Norwegian",
+    "rm": "Romansh",
+    "sv": "Swedish",
 }
+LANGUAGE_CODE = re.compile(r"[a-z]{2,3}")
 # the time zones of these countries, for the default country of the server
 TIMEZONES: dict[str, str] = {
     "Europe/Vienna": "040",
@@ -212,12 +217,15 @@ def service_languages(answer: Any) -> list[str]:
 
     :param answer: The answer of the directory, a list of stations per key.
     """
-    counts: dict[str, int] = {}
+    # counted per station that parse_services lists, so no language folder opens empty
+    languages: dict[str, str] = {}
     for item in _directory_items(answer):
-        language = _language(item)
-        if not language:
-            return []
-        counts[language] = counts.get(language, 0) + 1
+        rp_id = str(item.get("rpId") or "").strip()
+        if rp_id.isdigit() and _text(item.get("serviceName")):
+            if not (language := _language(item)):
+                return []
+            languages.setdefault(rp_id, language)
+    counts = Counter(languages.values())
     return sorted(counts, key=lambda language: (-counts[language], language))
 
 
@@ -298,8 +306,10 @@ def _directory_items(answer: Any) -> Iterable[dict[str, Any]]:
 
 
 def _language(item: dict[str, Any]) -> str:
-    """Return the language code of a directory entry, lowercase, or empty."""
-    return _text(item.get("language")).lower()
+    """Return the language code of a directory entry, lowercase, or empty when it is no code."""
+    language = _text(item.get("language")).lower()
+    # it becomes a path segment, so anything else (fr-be, a slash) counts as no language
+    return language if LANGUAGE_CODE.fullmatch(language) else ""
 
 
 def _fold(name: str) -> str:
