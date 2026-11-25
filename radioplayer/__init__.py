@@ -310,7 +310,27 @@ class RadioplayerProvider(MusicProvider):
             if parts[0] not in languages:
                 return []
             language, parts, rel = parts[0], parts[1:], f"{rel}{parts[0]}/"
-        letters = parse_services(answer, country, language)
+        return self._letters(path, rel, parts, parse_services(answer, country, language))
+
+    def _letters(
+        self,
+        path: str,
+        rel: str,
+        parts: list[str],
+        letters: dict[str, list[tuple[str, str, str | None, str | None]]],
+    ) -> list[BrowseFolder | Radio]:
+        """
+        Return a level of a country (or language) of All stations: its letters, or a letter.
+
+        :param path: The path of All stations.
+        :param rel: The path of the country (and language) below it, ending in a slash.
+        :param parts: The rest of the path: the letter, then the prefixes of a crowded letter.
+        :param letters: The stations of the country (and language) by first letter.
+        """
+
+        def folder(rel: str, name: str) -> BrowseFolder:
+            return self._folder(rel, f"{path}/{rel}", name)
+
         if not parts:
             # the folder of # is called other, as a # would end a path
             return [folder(f"{rel}{'other' if k == '#' else k}", k) for k in letters]
