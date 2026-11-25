@@ -327,7 +327,9 @@ async def test_all_stations_crowded_language(mass: MusicAssistant) -> None:
     crowded = [
         {"rpId": str(1000 + n), "serviceName": f"Radio {n}", "language": "nl"} for n in range(1500)
     ]
-    few = [{"rpId": str(5000 + n), "serviceName": f"Test {n}", "language": "fr"} for n in range(150)]
+    few = [
+        {"rpId": str(5000 + n), "serviceName": f"Test {n}", "language": "fr"} for n in range(150)
+    ]
 
     async def fetch(_url: str, _params: dict[str, str] | None = None) -> Any:
         return {"x": crowded + few}
