@@ -321,25 +321,33 @@ async def test_all_stations_crowded(mass: MusicAssistant) -> None:
     assert len(await provider.browse(letters[1].path)) == 150
     assert await provider.browse(f"{base}/R/ZZ") == []
 
-    # under a language folder a crowded letter splits the same way
-    def speaking(stations: list[dict[str, str]], language: str) -> list[dict[str, str]]:
-        return [{**station, "language": language} for station in stations]
 
-    async def languages(_url: str, _params: dict[str, str] | None = None) -> Any:
-        return {"x": speaking(crowded, "nl") + speaking(few, "fr")}
+async def test_all_stations_crowded_language(mass: MusicAssistant) -> None:
+    """Under a language folder a crowded letter splits the same way."""
+    crowded = [
+        {"rpId": str(1000 + n), "serviceName": f"Radio {n}", "language": "nl"} for n in range(1500)
+    ]
+    few = [{"rpId": str(5000 + n), "serviceName": f"Test {n}", "language": "fr"} for n in range(150)]
+
+    async def fetch(_url: str, _params: dict[str, str] | None = None) -> Any:
+        return {"x": crowded + few}
 
     provider = await _provider(mass, ["056"])
-    provider._fetch = languages  # type: ignore[attr-defined]  # noqa: SLF001
+    provider._fetch = fetch  # type: ignore[attr-defined]  # noqa: SLF001
     base = f"{provider.instance_id}://all/056"
     assert [f.item_id for f in _folders(await provider.browse(base))] == ["056/nl", "056/fr"]
     second = _folders(await provider.browse(f"{base}/nl/R"))
     assert second[0].path == f"{base}/nl/R/RADIO_0"
     assert second[0].item_id == "056/nl/R/RADIO_0"
-    sizes.clear()
-    depths.clear()
-    await walk(f"{base}/nl/R", 1)
-    assert sum(sizes) == 1501
-    assert max(sizes) <= 150
+
+    async def count(path: str) -> int:
+        items = await provider.browse(path)
+        radios = [item for item in items if not isinstance(item, BrowseFolder)]
+        assert len(radios) <= 150
+        return len(radios) + sum([await count(f.path) for f in _folders(items)])
+
+    # every Radio station of Dutch is reached once, the French ones stay apart
+    assert await count(f"{base}/nl/R") == 1500
     assert len(await provider.browse(f"{base}/fr/T")) == 150
 
 

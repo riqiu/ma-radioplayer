@@ -281,7 +281,7 @@ def test_service_languages() -> None:
     # a value that is no language code (it would split the path) counts as none
     for odd in ("fr-be", "fr/be", "#", "f"):
         station = {"rpId": "4", "serviceName": "Vier", "language": odd}
-        assert service_languages({"a": [*answer["a"], station]}) == []
+        assert service_languages({**answer, "c": [station]}) == []
 
 
 def test_service() -> None:
