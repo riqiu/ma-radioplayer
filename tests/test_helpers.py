@@ -19,6 +19,7 @@ from radioplayer.helpers import (
     parse_services,
     parse_stations,
     poll_seconds,
+    service_languages,
     split_stream_title,
     station_prefix,
 )
@@ -249,6 +250,27 @@ def test_services() -> None:
     }
     assert parse_services(None, "056") == {}
     assert station_prefix("Radio 1") == "RA"
+    assert service_languages(answer) == []
+
+
+def test_service_languages() -> None:
+    """The languages of a directory, most used first; none when a station lacks one."""
+    answer = {
+        "a": [
+            {"rpId": "1", "serviceName": "Un", "language": "fr"},
+            {"rpId": "2", "serviceName": "Twee", "language": "NL"},
+            {"rpId": "3", "serviceName": "Drie", "language": "nl"},
+        ],
+        "b": ["junk"],
+    }
+    assert service_languages(answer) == ["nl", "fr"]
+    assert parse_services(answer, "056", "nl") == {
+        "D": [("056-3", "Drie", None, None)],
+        "T": [("056-2", "Twee", None, None)],
+    }
+    assert parse_services(answer, "056", "de") == {}
+    assert service_languages({"a": [{"rpId": "1", "serviceName": "X"}]}) == []
+    assert service_languages(None) == []
     assert station_prefix("Écho") == "EC"
     assert station_prefix("A/B") == "A_"
     assert station_prefix("X") == "X"

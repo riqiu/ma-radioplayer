@@ -30,6 +30,19 @@ COUNTRIES: dict[str, tuple[str, str]] = {
     "756": ("ch", "Switzerland"),
     "826": ("uk", "United Kingdom"),
 }
+# the languages the directories give their stations, by code, for the folders of a country
+# that has stations in several; another code shows as it is
+LANGUAGES: dict[str, str] = {
+    "da": "Danish",
+    "de": "German",
+    "en": "English",
+    "es": "Spanish",
+    "fi": "Finnish",
+    "fr": "French",
+    "it": "Italian",
+    "nl": "Dutch",
+    "no": "Norwegian",
+}
 # the time zones of these countries, for the default country of the server
 TIMEZONES: dict[str, str] = {
     "Europe/Vienna": "040",
@@ -191,8 +204,25 @@ def parse_search(answer: Any, country: str) -> list[tuple[str, str, str | None]]
     return list(found.values())
 
 
+def service_languages(answer: Any) -> list[str]:
+    """
+    Return the languages of a directory's stations, the most used first.
+
+    Empty when a station has no language, as it would then be in no language folder.
+
+    :param answer: The answer of the directory, a list of stations per key.
+    """
+    counts: dict[str, int] = {}
+    for item in _directory_items(answer):
+        language = _language(item)
+        if not language:
+            return []
+        counts[language] = counts.get(language, 0) + 1
+    return sorted(counts, key=lambda language: (-counts[language], language))
+
+
 def parse_services(
-    answer: Any, country: str
+    answer: Any, country: str, language: str | None = None
 ) -> dict[str, list[tuple[str, str, str | None, str | None]]]:
     """
     Return the stations of a directory by first letter: item id, name, logo and slogan.
@@ -203,19 +233,19 @@ def parse_services(
 
     :param answer: The answer of the directory, a list of stations per key.
     :param country: The numeric code of the country.
+    :param language: Only the stations in this language, when given.
     """
     found: dict[str, tuple[str, str, str | None, str | None]] = {}
-    for group in _values(answer):
-        for item in _values(group):
-            if not isinstance(item, dict):
-                continue
-            rp_id = str(item.get("rpId") or "").strip()
-            name = _text(item.get("serviceName"))
-            if rp_id.isdigit() and name:
-                item_id = f"{country}-{rp_id}"
-                logo = _text(item.get("imageUrl")) or None
-                slogan = " ".join(_text(item.get("shortDescription")).split()) or None
-                found.setdefault(item_id, (item_id, name, logo, slogan))
+    for item in _directory_items(answer):
+        if language is not None and _language(item) != language:
+            continue
+        rp_id = str(item.get("rpId") or "").strip()
+        name = _text(item.get("serviceName"))
+        if rp_id.isdigit() and name:
+            item_id = f"{country}-{rp_id}"
+            logo = _text(item.get("imageUrl")) or None
+            slogan = " ".join(_text(item.get("shortDescription")).split()) or None
+            found.setdefault(item_id, (item_id, name, logo, slogan))
     letters: dict[str, list[tuple[str, str, str | None, str | None]]] = {}
     for station in sorted(found.values(), key=lambda s: _fold(s[1])):
         first = _fold(station[1])[0]
@@ -257,6 +287,19 @@ def split_stations(
             return groups
         if len(next(iter(groups))) < length:
             return None
+
+
+def _directory_items(answer: Any) -> Iterable[dict[str, Any]]:
+    """Return the station entries of a directory's answer, whatever its keys."""
+    for group in _values(answer):
+        for item in _values(group):
+            if isinstance(item, dict):
+                yield item
+
+
+def _language(item: dict[str, Any]) -> str:
+    """Return the language code of a directory entry, lowercase, or empty."""
+    return _text(item.get("language")).lower()
 
 
 def _fold(name: str) -> str:
