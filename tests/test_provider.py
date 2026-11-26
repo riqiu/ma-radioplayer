@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from aiohttp import web
 from music_assistant_models.enums import MediaType, ProviderTier, StreamType
 from music_assistant_models.errors import (
     MediaNotFoundError,
@@ -19,7 +20,7 @@ from music_assistant.controllers.streams.constants import (
 )
 from music_assistant.mass import MusicAssistant
 from music_assistant.models.music_provider import MusicProvider
-from tests import DOMAIN
+from tests import DOMAIN, live
 
 STATIONS = [
     "Willy | https://stream.example/willy.mp3 | 056/5067",
@@ -208,13 +209,11 @@ def _folders(items: Iterable[Any]) -> list[BrowseFolder]:
 
 async def test_all_stations(mass: MusicAssistant) -> None:
     """All stations lists every country, the picked one first, then the letters of a country."""
-    services = {
-        "undefined": [
-            {"rpId": "5067", "serviceName": "Willy", "imageUrl": BIG, "shortDescription": "Hits"},
-            {"rpId": "5010", "serviceName": "De Tijdloze"},
-            {"rpId": "138", "serviceName": "10 FM"},
-        ]
-    }
+    services = [
+        live("5067", "Willy", description="Hits", multimedia=[{"url": BIG}]),
+        live("5010", "De Tijdloze"),
+        live("138", "10 FM"),
+    ]
 
     async def fetch(_url: str, _params: dict[str, str] | None = None) -> Any:
         return services
@@ -251,14 +250,12 @@ async def test_all_stations(mass: MusicAssistant) -> None:
 
 async def test_all_stations_languages(mass: MusicAssistant) -> None:
     """A country with stations in several languages has a folder per language, most used first."""
-    services = {
-        "undefined": [
-            {"rpId": "5067", "serviceName": "Willy", "language": "nl"},
-            {"rpId": "5010", "serviceName": "De Tijdloze", "language": "nl"},
-            {"rpId": "6000", "serviceName": "Bel RTL", "language": "fr"},
-            {"rpId": "7000", "serviceName": "Radio Xyz", "language": "xx"},
-        ]
-    }
+    services = [
+        live("5067", "Willy", "nl"),
+        live("5010", "De Tijdloze", "nl"),
+        live("6000", "Bel RTL", "fr"),
+        live("7000", "Radio Xyz", "xx"),
+    ]
 
     async def fetch(_url: str, _params: dict[str, str] | None = None) -> Any:
         return services
@@ -284,12 +281,12 @@ async def test_all_stations_languages(mass: MusicAssistant) -> None:
 
 async def test_all_stations_crowded(mass: MusicAssistant) -> None:
     """A folder with more than 150 stations splits by longer prefixes until none is crowded."""
-    crowded = [{"rpId": str(1000 + n), "serviceName": f"Radio {n}"} for n in range(1500)]
-    crowded += [{"rpId": "1", "serviceName": "Rádio X"}, {"rpId": "2", "serviceName": "Øst"}]
-    few = [{"rpId": str(5000 + n), "serviceName": f"Test {n}"} for n in range(150)]
+    crowded = [live(str(1000 + n), f"Radio {n}") for n in range(1500)]
+    crowded += [live("1", "Rádio X"), live("2", "Øst")]
+    few = [live(str(5000 + n), f"Test {n}") for n in range(150)]
 
     async def fetch(_url: str, _params: dict[str, str] | None = None) -> Any:
-        return {"x": crowded + few}
+        return crowded + few
 
     provider = await _provider(mass, ["056", "276"])
     provider._fetch = fetch  # type: ignore[attr-defined]  # noqa: SLF001
@@ -324,15 +321,11 @@ async def test_all_stations_crowded(mass: MusicAssistant) -> None:
 
 async def test_all_stations_crowded_language(mass: MusicAssistant) -> None:
     """Under a language folder a crowded letter splits the same way."""
-    crowded = [
-        {"rpId": str(1000 + n), "serviceName": f"Radio {n}", "language": "nl"} for n in range(1500)
-    ]
-    few = [
-        {"rpId": str(5000 + n), "serviceName": f"Test {n}", "language": "fr"} for n in range(150)
-    ]
+    crowded = [live(str(1000 + n), f"Radio {n}", "nl") for n in range(1500)]
+    few = [live(str(5000 + n), f"Test {n}", "fr") for n in range(150)]
 
     async def fetch(_url: str, _params: dict[str, str] | None = None) -> Any:
-        return {"x": crowded + few}
+        return crowded + few
 
     provider = await _provider(mass, ["056"])
     provider._fetch = fetch  # type: ignore[attr-defined]  # noqa: SLF001
@@ -365,21 +358,21 @@ async def test_all_stations_unreachable(mass: MusicAssistant) -> None:
     assert len(await provider.browse(f"{provider.instance_id}://")) == 4
 
     # an error that came with a 200 is no list, and is not kept
-    junks: list[Any] = [{"error": "busy"}, {}, [], "x"]
+    junks: list[Any] = [{"error": "busy"}, {}, [], ["x"], "x", None]
     for junk in junks:
 
         async def answer(_url: str, _params: dict[str, str] | None = None, junk: Any = junk) -> Any:
             return junk
 
         provider._fetch = answer  # type: ignore[attr-defined]  # noqa: SLF001
-        assert await provider._services("056") is None  # type: ignore[attr-defined]  # noqa: SLF001
+        assert await provider._live_stations("056") is None  # type: ignore[attr-defined]  # noqa: SLF001
 
 
 async def test_all_stations_countries(mass: MusicAssistant) -> None:
     """The picked countries come first, in the order of the settings, then the rest by name."""
 
     async def fetch(_url: str, _params: dict[str, str] | None = None) -> Any:
-        return {"d": [{"rpId": "5010", "serviceName": "De Tijdloze"}]}
+        return [live("5010", "De Tijdloze")]
 
     several = await _provider(mass, ["276", "056"])
     several._fetch = fetch  # type: ignore[attr-defined]  # noqa: SLF001
@@ -416,7 +409,7 @@ async def test_default_country(mass: MusicAssistant, monkeypatch: pytest.MonkeyP
 
 
 async def test_radioplayer_stations(mass: MusicAssistant) -> None:
-    """Search finds Radioplayer's stations, which play the stream its directory lists."""
+    """Search finds Radioplayer's stations, which play the stream its live stations list."""
     provider = await _provider(mass, ["056"])
     search = {
         "results": {
@@ -428,16 +421,22 @@ async def test_radioplayer_stations(mass: MusicAssistant) -> None:
             }
         }
     }
+    station = live("5010", "De Tijdloze", multimedia=[{"url": BIG}])
+    # a station the live stations lack is still in the old directory
     service = {
-        "serviceName": "De Tijdloze",
+        "serviceName": "Mökkiradio",
         "imageUrl": SMALL,
-        "streams": [{"url": "https://streams.example/tijdloze.aac?source=radioplayer"}],
+        "streams": [{"url": "https://streams.example/mokki.mp3?rp_source=1"}],
     }
+    posted: list[Any] = []
 
-    async def fetch(url: str, _params: dict[str, str] | None = None) -> Any:
+    async def fetch(url: str, _params: dict[str, str] | None = None, body: Any = None) -> Any:
         if "/search" in url:
             return search
-        return service if url.endswith("/be/public/service/5010") else None
+        if url.endswith("/api/live-stations"):
+            posted.append(body)
+            return [station] if body == {"requestMap": {"056": ["5010"]}} else []
+        return service if url.endswith("/be/public/service/226") else None
 
     # no network in tests: the answers of Radioplayer are stand-ins
     provider._fetch = fetch  # type: ignore[attr-defined]  # noqa: SLF001
@@ -450,21 +449,27 @@ async def test_radioplayer_stations(mass: MusicAssistant) -> None:
     radio = await provider.get_radio("056-5010")
     assert radio.name == "De Tijdloze"
     assert radio.image is not None
-    assert radio.image.path == SMALL  # the search has no bigger logo for it
+    assert radio.image.path == BIG
 
     details = await provider.get_stream_details("056-5010", MediaType.RADIO)
-    assert details.path == "https://streams.example/tijdloze.aac?source=radioplayer"
+    assert details.path == "https://streams.example/5010.mp3"
     assert details.stream_metadata_update_callback is not None
+    assert posted[-1] == {"requestMap": {"056": ["5010"]}}
+
+    radio = await provider.get_radio("056-226")
+    assert (radio.name, radio.image.path if radio.image else None) == ("Mökkiradio", SMALL)
+    details = await provider.get_stream_details("056-226", MediaType.RADIO)
+    assert details.path == "https://streams.example/mokki.mp3?rp_source=1"
 
     with pytest.raises(MediaNotFoundError):
         await provider.get_radio("056-1")
     with pytest.raises(MediaNotFoundError):
         await provider.get_stream_details("999-1", MediaType.RADIO)
-    service["streams"] = []
+    station["liveStreams"] = []
     with pytest.raises(UnplayableMediaError):
         await provider.get_stream_details("056-5010", MediaType.RADIO)
 
-    async def unreachable(_url: str, _params: dict[str, str] | None = None) -> Any:
+    async def unreachable(_url: str, _params: dict[str, str] | None = None, **_: Any) -> Any:
         raise ProviderUnavailableError("down")
 
     # Radioplayer down: the station is not called gone, and a search still answers
@@ -473,3 +478,29 @@ async def test_radioplayer_stations(mass: MusicAssistant) -> None:
         await provider.get_radio("056-5010")
     result = await provider.search("other", [MediaType.RADIO])
     assert result.radio == []
+
+
+async def test_working_stream(mass: MusicAssistant, aiohttp_server: Any) -> None:
+    """Of several streams the first that answers plays; a single one is not checked."""
+    asked: list[str] = []
+
+    async def handle(request: web.Request) -> web.StreamResponse:
+        asked.append(request.path)
+        if request.path.startswith("/gone"):
+            raise web.HTTPNotFound
+        return web.Response(body=b"audio", content_type="audio/mpeg")
+
+    app = web.Application()
+    app.router.add_get("/{name}", handle)
+    server = await aiohttp_server(app)
+    provider = await _provider(mass, ["246"])
+    pick = provider._working_stream  # type: ignore[attr-defined]  # noqa: SLF001
+
+    gone, works = str(server.make_url("/gone.aac")), str(server.make_url("/works.mp3"))
+    assert await pick([gone, works, str(server.make_url("/later.mp3"))]) == works
+    assert asked == ["/gone.aac", "/works.mp3"]
+    asked.clear()
+    assert await pick([gone]) == gone
+    assert asked == []
+    # none answers: the first is played, and the server reports why it fails
+    assert await pick([gone, str(server.make_url("/gone2"))]) == gone

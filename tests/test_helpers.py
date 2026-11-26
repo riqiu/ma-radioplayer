@@ -17,12 +17,14 @@ from radioplayer.helpers import (
     parse_search,
     parse_service,
     parse_services,
+    parse_station,
     parse_stations,
     poll_seconds,
     service_languages,
     split_stream_title,
     station_prefix,
 )
+from tests import live
 
 COVER = "https://assets.radioplayer.org/coverArt/96cd3aeaeb3c9b62f0c016f9cfa6c58d.jpg"
 LOGO = "https://assets.radioplayer.org/056/0565067/600/600/l45bvtox.png"
@@ -189,6 +191,7 @@ SERVICE = {
         {"url": "", "format": "aac"},
         {"url": "https://streams.example/willy/aac?source=radioplayer", "format": "aac"},
         {"url": "https://streams.example/willy/mp3?source=radioplayer", "format": "mp3"},
+        {"url": "https://streams.example/willy/aac?source=radioplayer", "format": "aac"},
     ],
 }
 
@@ -221,27 +224,32 @@ def test_search() -> None:
 
 
 def test_services() -> None:
-    """The directory is grouped by first letter, whatever key it uses, without broken entries."""
-    # shaped like the real answer: Belgium has one key for all its stations
-    answer = {
-        "undefined": [
-            {
-                "rpId": "5067",
-                "serviceName": "Willy",
-                "imageUrl": "https://logo.example/w.png",
-                "shortDescription": "Hits\nall day",
-            },
-            {"rpId": "5010", "serviceName": "De Tijdloze", "imageUrl": ""},
-            {"rpId": "138", "serviceName": "10 FM"},
-            {"rpId": "9", "serviceName": "  Écho "},
-            {"rpId": "5067", "serviceName": "Willy again"},
-            {"rpId": "x", "serviceName": "No id"},
-            {"rpId": "6", "serviceName": "Østerlig"},
-            {"rpId": "7", "serviceName": ""},
-            "junk",
-        ]
-    }
+    """The live stations are grouped by first letter, without broken or silent entries."""
+    answer = [
+        live(
+            "5067",
+            "Willy",
+            description="Hits\nall day",
+            multimedia=[
+                {"url": "https://logo.example/small.png", "width": 288, "height": 162},
+                {"url": "https://logo.example/w.png", "width": 600, "height": 600},
+                {"url": "", "width": 900, "height": 900},
+            ],
+        ),
+        live("5010", "De Tijdloze", description=""),
+        live("138", "10 FM"),
+        live("9", "  Écho "),
+        live("5067", "Willy again"),
+        live("x", "No id"),
+        live("6", "Østerlig"),
+        live("7", ""),
+        live(8, "Acht"),
+        live("11", "Silent", liveStreams=[]),
+        live("12", "Broken stream", liveStreams=[{"audioStreams": [{"streamSource": {}}]}]),
+        "junk",
+    ]
     assert parse_services(answer, "056") == {
+        "A": [("056-8", "Acht", None, None)],
         "D": [("056-5010", "De Tijdloze", None, None)],
         "E": [("056-9", "Écho", None, None)],
         "W": [("056-5067", "Willy", "https://logo.example/w.png", "Hits all day")],
@@ -249,6 +257,7 @@ def test_services() -> None:
         "#": [("056-138", "10 FM", None, None)],
     }
     assert parse_services(None, "056") == {}
+    assert parse_services({"error": "busy"}, "056") == {}
     assert station_prefix("Radio 1") == "RA"
     assert station_prefix("Écho") == "EC"
     assert station_prefix("A/B") == "A_"
@@ -257,41 +266,89 @@ def test_services() -> None:
 
 
 def test_service_languages() -> None:
-    """The languages of a directory's listed stations, most used first; none when one lacks it."""
-    answer = {
-        "a": [
-            {"rpId": "1", "serviceName": "Un", "language": "fr"},
-            {"rpId": "2", "serviceName": "Twee", "language": "NL"},
-            {"rpId": "3", "serviceName": "Drie", "language": "nl"},
-            # not listed, so not counted: a duplicate, no id, no name
-            {"rpId": "1", "serviceName": "Un again", "language": "de"},
-            {"rpId": "x", "serviceName": "No id", "language": "de"},
-            {"rpId": "9", "serviceName": "", "language": "de"},
-        ],
-        "b": ["junk"],
-    }
+    """The languages of the listed stations, most used first; none when one lacks it."""
+    answer = [
+        live("1", "Un", "fr"),
+        live("2", "Twee", "NL"),
+        # the language its links and logos give most
+        live(
+            "3",
+            "Drie",
+            "nl",
+            multimedia=[
+                {"url": "https://logo.example/3.png", "language": "nl"},
+                {"url": "https://logo.example/3-wide.png", "language": "nl"},
+            ],
+            links=[{"language": "fr"}],
+        ),
+        # not listed, so not counted: a duplicate, no id, no name, no stream
+        live("1", "Un again", "de"),
+        live("x", "No id", "de"),
+        live("9", "", "de"),
+        live("10", "Silent", "de", liveStreams=[]),
+        "junk",
+    ]
     assert service_languages(answer) == ["nl", "fr"]
     assert parse_services(answer, "056", "nl") == {
-        "D": [("056-3", "Drie", None, None)],
+        "D": [("056-3", "Drie", "https://logo.example/3.png", None)],
         "T": [("056-2", "Twee", None, None)],
     }
     assert parse_services(answer, "056", "de") == {}
-    assert service_languages({"a": [{"rpId": "1", "serviceName": "X"}]}) == []
+    assert service_languages([live("1", "X")]) == []
     assert service_languages(None) == []
     # a value that is no language code (it would split the path) counts as none
     for odd in ("fr-be", "fr/be", "#", "f"):
-        station = {"rpId": "4", "serviceName": "Vier", "language": odd}
-        assert service_languages({**answer, "c": [station]}) == []
+        assert service_languages([*answer, live("4", "Vier", odd)]) == []
+
+
+def test_station() -> None:
+    """A live station gives its name, largest logo and streams, the highest bit rate first."""
+
+    def stream(url: str, rate: Any) -> dict[str, Any]:
+        return {"streamSource": {"url": url}, "bitRate": {"target": rate}}
+
+    streams = [
+        {"audioStreams": [stream("https://s.example/64.aac", 64000), stream("", 320000)]},
+        {"audioStreams": [stream("https://s.example/128.mp3", 128000), "junk"]},
+        {"audioStreams": [stream("https://s.example/hls.m3u8", None)]},
+        {"audioStreams": [stream("https://s.example/128.mp3", 128000)]},
+        {"audioStreams": [stream("https://s.example/64-car.aac", 64000)]},
+        "junk",
+    ]
+    logo = {"url": "https://logo.example/n.png", "width": 600, "height": 600}
+    answer = [
+        live("1", "Other"),
+        live("134", "Radio Nova", liveStreams=streams, multimedia=[logo]),
+    ]
+    assert parse_station(answer, "134") == (
+        "Radio Nova",
+        "https://logo.example/n.png",
+        [
+            "https://s.example/128.mp3",
+            "https://s.example/64.aac",
+            "https://s.example/64-car.aac",
+            "https://s.example/hls.m3u8",
+        ],
+    )
+    assert parse_station(answer, "1") == ("Other", None, ["https://streams.example/1.mp3"])
+    assert parse_station([live("2", "Silent", liveStreams=[])], "2") == ("Silent", None, [])
+    assert parse_station(answer, "999") is None
+    assert parse_station([live("3", "")], "3") is None
+    assert parse_station([], "1") is None
+    assert parse_station(None, "1") is None
 
 
 def test_service() -> None:
-    """The directory gives the name, the logo and the first stream as it is."""
+    """The old directory gives the name, the logo and the streams as they are, each once."""
     assert parse_service(SERVICE) == (
         "Willy",
         SERVICE["imageUrl"],
-        "https://streams.example/willy/aac?source=radioplayer",
+        [
+            "https://streams.example/willy/aac?source=radioplayer",
+            "https://streams.example/willy/mp3?source=radioplayer",
+        ],
     )
-    assert parse_service({**SERVICE, "streams": []}) == ("Willy", SERVICE["imageUrl"], None)
+    assert parse_service({**SERVICE, "streams": []}) == ("Willy", SERVICE["imageUrl"], [])
     assert parse_service({**SERVICE, "deleted": True}) is None
     assert parse_service({"message": "Forbidden"}) is None
     assert parse_service(None) is None
