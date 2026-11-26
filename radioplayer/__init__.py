@@ -2,7 +2,7 @@
 Radioplayer for Music Assistant: radio stations that show what really plays.
 
 The stations come from the Radioplayer search of the countries the user picks, played from
-the streams in Radioplayer's own station directory, or from the stations the user lists,
+the streams in Radioplayer's own list of live stations, or from the stations the user lists,
 each with its stream and its Radioplayer id. While a station plays, the provider asks the
 public Radioplayer feed what plays now and shows its artist, title and cover. The title in
 the stream itself is only used while the feed can't be reached, as many stations leave the
@@ -64,6 +64,7 @@ from .helpers import (
     parse_search,
     parse_service,
     parse_services,
+    parse_station,
     parse_stations,
     poll_seconds,
     service_languages,
@@ -98,9 +99,14 @@ HINT_ID: Final[str] = "pick-country"
 HINT: Final[str] = "Pick one or more countries in the Radioplayer settings"
 FEED_URL: Final[str] = "https://core-search.radioplayer.cloud/{country}/qp/v4/events"
 SEARCH_URL: Final[str] = "https://core-search.radioplayer.cloud/{country}/qp/v4/search"
+# the live stations of Radioplayer's web player: all of a country, or the ones asked for
+LIVE_STATIONS_URL: Final[str] = "https://play.radioplayer.org/api/live-stations"
+# the old station directory, only for a station the live stations lack: it misses many
+# stations and lists streams that are gone
 SERVICE_URL: Final[str] = "https://mapi.radioplayer.cloud/api/{directory}/public/service/{rp_id}"
-SERVICES_URL: Final[str] = "https://mapi.radioplayer.cloud/api/{directory}/public/services"
 REQUEST_TIMEOUT: Final[aiohttp.ClientTimeout] = aiohttp.ClientTimeout(total=10)
+# how long a stream may take to answer when a station has several to pick from
+STREAM_CHECK_TIMEOUT: Final[aiohttp.ClientTimeout] = aiohttp.ClientTimeout(total=5)
 # the stations of a country change seldom; a failed search is not kept
 SEARCH_CACHE_SECONDS: Final[int] = 24 * 3600
 # how long to leave the feed of a station alone after it failed
@@ -185,18 +191,10 @@ class RadioplayerProvider(MusicProvider):
         """
         if station := self._stations.get(prov_radio_id):
             return self._radio(station.item_id, station.name, station.logo_url)
-        country, rp_id = _catalog_id(prov_radio_id)
-        details = parse_service(await self._service(country, rp_id))
+        details = await self._station(*_catalog_id(prov_radio_id))
         if details is None:
             raise MediaNotFoundError(f"Unknown station: {prov_radio_id}")
-        name, logo_url, _stream = details
-        # the directory has a small logo; the search has the same station at 600x600
-        for item_id, _name, big_logo in parse_search(
-            await self._search_country(country, name.lower()), country
-        ):
-            if item_id == prov_radio_id and big_logo:
-                logo_url = big_logo
-                break
+        name, logo_url, _streams = details
         return self._radio(prov_radio_id, name, logo_url)
 
     async def search(
@@ -302,7 +300,7 @@ class RadioplayerProvider(MusicProvider):
             return []
         # rel is the path below All stations, and the id of the folder
         country, parts, rel = parts[0], parts[1:], f"{parts[0]}/"
-        answer = await self._services(country)
+        answer = await self._live_stations(country)
         language = None
         if len(languages := service_languages(answer)) > 1:
             if not parts:
@@ -443,10 +441,10 @@ class RadioplayerProvider(MusicProvider):
             path = station.stream_url
         else:
             # asked at every start: the stream addresses carry parameters that may change
-            details = parse_service(await self._service(*_catalog_id(item_id)))
-            if details is None or details[2] is None:
+            details = await self._station(*_catalog_id(item_id))
+            if details is None or not details[2]:
                 raise UnplayableMediaError(f"Radioplayer has no stream for station {item_id}")
-            path = details[2]
+            path = await self._working_stream(details[2])
         return StreamDetails(
             provider=self.instance_id,
             item_id=item_id,
@@ -518,37 +516,73 @@ class RadioplayerProvider(MusicProvider):
         return None
 
     @use_cache(SEARCH_CACHE_SECONDS, cache_none=False)
-    async def _services(self, country: str) -> Any:
-        """Return all stations of a country's directory, or None when it fails."""
+    async def _live_stations(self, country: str) -> Any:
+        """Return all live stations of a country, or None when it fails."""
         try:
-            answer = await self._fetch(SERVICES_URL.format(directory=COUNTRIES[country][0]))
+            answer = await self._fetch(LIVE_STATIONS_URL, {"countryCode": country})
         except ProviderUnavailableError:
             return None
         # only a real list is kept for a day, never an error that came with a 200
-        if (
-            isinstance(answer, dict)
-            and answer
-            and all(isinstance(v, list) for v in answer.values())
-        ):
+        if isinstance(answer, list) and answer and all(isinstance(v, dict) for v in answer):
             return answer
         return None
 
-    async def _service(self, country: str, rp_id: str) -> Any:
-        """Return the entry of a station in the directory, or None when it fails."""
-        directory = COUNTRIES[country][0]
-        return await self._fetch(SERVICE_URL.format(directory=directory, rp_id=rp_id))
+    async def _station(self, country: str, rp_id: str) -> tuple[str, str | None, list[str]] | None:
+        """
+        Return the name, logo and streams of a station, or None when Radioplayer lacks it.
 
-    async def _fetch(self, url: str, params: dict[str, str] | None = None) -> Any:
+        The live stations come first; the old directory only for a station they lack, such as
+        one added to the library before it left them.
+        """
+        answer = await self._fetch(LIVE_STATIONS_URL, body={"requestMap": {country: [rp_id]}})
+        if details := parse_station(answer, rp_id):
+            return details
+        directory = COUNTRIES[country][0]
+        return parse_service(
+            await self._fetch(SERVICE_URL.format(directory=directory, rp_id=rp_id))
+        )
+
+    async def _working_stream(self, urls: list[str]) -> str:
+        """
+        Return the first stream that answers, or the first stream when none does.
+
+        Radioplayer lists streams that are gone beside ones that work, such as those of some
+        local stations of Bauer in Finland. Only the headers are read, then the connection is
+        closed; a station with a single stream is not checked.
+
+        :param urls: The streams of the station, best first.
+        """
+        if len(urls) > 1:
+            for url in urls:
+                try:
+                    async with self.mass.http_session.get(
+                        url, timeout=STREAM_CHECK_TIMEOUT
+                    ) as response:
+                        if response.status < 400:
+                            return url
+                        self.logger.debug("Stream %s answered %s", url, response.status)
+                except (aiohttp.ClientError, TimeoutError) as err:
+                    self.logger.debug("Stream %s can't be reached: %s", url, err)
+        return urls[0]
+
+    async def _fetch(self, url: str, params: dict[str, str] | None = None, body: Any = None) -> Any:
         """
         Return the content of a Radioplayer answer, or None when Radioplayer refuses it (4xx).
 
         Raise ProviderUnavailableError when Radioplayer can't be reached or answers nonsense,
         so a hiccup never reads as a station that is gone.
+
+        :param url: The address to ask.
+        :param params: The query parameters.
+        :param body: A JSON body to post; the request is a GET without one.
         """
+        method = "GET" if body is None else "POST"
         try:
             async with (
                 self._throttler,
-                self.mass.http_session.get(url, params=params, timeout=REQUEST_TIMEOUT) as response,
+                self.mass.http_session.request(
+                    method, url, params=params, json=body, timeout=REQUEST_TIMEOUT
+                ) as response,
             ):
                 if 400 <= response.status < 500:
                     self.logger.debug("Radioplayer refused %s: %s", url, response.status)

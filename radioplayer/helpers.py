@@ -13,9 +13,9 @@ from typing import Any
 
 from music_assistant_models.streamdetails import StreamMetadata
 
-# the countries whose stations can be searched and played: the numeric code that the feed
-# and the search use, and the letter code and English name of the station directory that
-# lists the streams (Ireland and others are searchable, but their directory is unknown)
+# the countries whose stations can be searched and played: the numeric code that the feed,
+# the search and the live stations use, the letter code of the old station directory and
+# the English name
 COUNTRIES: dict[str, tuple[str, str]] = {
     "040": ("at", "Austria"),
     "056": ("be", "Belgium"),
@@ -211,11 +211,11 @@ def parse_search(answer: Any, country: str) -> list[tuple[str, str, str | None]]
 
 def service_languages(answer: Any) -> list[str]:
     """
-    Return the languages of a directory's stations, the most used first.
+    Return the languages of a country's stations, the most used first.
 
     Empty when a station has no language, as it would then be in no language folder.
 
-    :param answer: The answer of the directory, a list of stations per key.
+    :param answer: The answer of the live stations of a country, a list of stations.
     """
     # counted per station that parse_services lists, so no language folder opens empty
     counts = Counter(_language(item) for item in _listed(answer).values())
@@ -228,22 +228,22 @@ def parse_services(
     answer: Any, country: str, language: str | None = None
 ) -> dict[str, list[tuple[str, str, str | None, str | None]]]:
     """
-    Return the stations of a directory by first letter: item id, name, logo and slogan.
+    Return the stations of a country by first letter: item id, name, logo and slogan.
 
-    The directory's own letters are not used: Belgium has all its stations under one key.
-    A name that does not start with a letter goes under ``#``; a letter outside A-Z, such as
-    Ø, has its own key.
+    Only stations with a stream are listed, as the others can't play. The list's own letters
+    are not used; a name that does not start with a letter goes under ``#``, and a letter
+    outside A-Z, such as Ø, has its own key.
 
-    :param answer: The answer of the directory, a list of stations per key.
+    :param answer: The answer of the live stations of a country, a list of stations.
     :param country: The numeric code of the country.
     :param language: Only the stations in this language, when given.
     """
     found = [
         (
             f"{country}-{rp_id}",
-            _text(item.get("serviceName")),
-            _text(item.get("imageUrl")) or None,
-            " ".join(_text(item.get("shortDescription")).split()) or None,
+            _text(item.get("name")),
+            _logo(item),
+            " ".join(_text(item.get("description")).split()) or None,
         )
         for rp_id, item in _listed(answer).items()
         if language is None or _language(item) == language
@@ -253,6 +253,26 @@ def parse_services(
         first = _fold(station[1])[0]
         letters.setdefault(first.upper() if first.isalpha() else "#", []).append(station)
     return dict(sorted(letters.items(), key=lambda kv: (kv[0] == "#", kv[0])))
+
+
+def parse_station(answer: Any, rp_id: str) -> tuple[str, str | None, list[str]] | None:
+    """
+    Return the name, logo and streams of a station in an answer of the live stations.
+
+    None when the answer does not have the station. The streams come best first, each once,
+    and are kept as given, with the parameters by which the station counts its listeners.
+
+    :param answer: The answer of the live stations, a list of stations.
+    :param rp_id: The Radioplayer id of the station.
+    """
+    for item in _values(answer):
+        if (
+            isinstance(item, dict)
+            and str(item.get("id") or "").strip() == rp_id
+            and (name := _text(item.get("name")))
+        ):
+            return name, _logo(item), _streams(item)
+    return None
 
 
 def station_prefix(name: str, length: int = 2) -> str:
@@ -291,27 +311,57 @@ def split_stations(
             return None
 
 
-def _directory_items(answer: Any) -> Iterable[dict[str, Any]]:
-    """Return the station entries of a directory's answer, whatever its keys."""
-    for group in _values(answer):
-        for item in _values(group):
-            if isinstance(item, dict):
-                yield item
-
-
 def _listed(answer: Any) -> dict[str, dict[str, Any]]:
-    """Return the directory entries to list by Radioplayer id: with an id and a name, the first."""
+    """Return the live stations to list by Radioplayer id: with an id, a name and a stream."""
     listed: dict[str, dict[str, Any]] = {}
-    for item in _directory_items(answer):
-        rp_id = str(item.get("rpId") or "").strip()
-        if rp_id.isdigit() and _text(item.get("serviceName")):
+    for item in _values(answer):
+        if not isinstance(item, dict):
+            continue
+        rp_id = str(item.get("id") or "").strip()
+        if rp_id.isdigit() and _text(item.get("name")) and _streams(item):
             listed.setdefault(rp_id, item)
     return listed
 
 
+def _streams(item: dict[str, Any]) -> list[str]:
+    """Return the stream addresses of a live station, the highest bit rate first, each once."""
+    found: list[tuple[float, str]] = []
+    for live in _values(item.get("liveStreams")):
+        for stream in _values(live.get("audioStreams") if isinstance(live, dict) else None):
+            if not isinstance(stream, dict):
+                continue
+            source = stream.get("streamSource")
+            url = _text(source.get("url")) if isinstance(source, dict) else ""
+            bit_rate = stream.get("bitRate")
+            target = bit_rate.get("target") if isinstance(bit_rate, dict) else None
+            if _is_web_address(url):
+                rate = target if isinstance(target, int | float) and target is not True else 0
+                found.append((rate, url))
+    # sorted is stable: streams of the same bit rate keep the order of the list
+    return list(dict.fromkeys(url for _rate, url in sorted(found, key=lambda f: -f[0])))
+
+
+def _logo(item: dict[str, Any]) -> str | None:
+    """Return the largest logo of a live station, or None when it has none."""
+    logos: list[tuple[float, str]] = []
+    for picture in _values(item.get("multimedia")):
+        if isinstance(picture, dict) and _is_web_address(url := _text(picture.get("url"))):
+            width, height = picture.get("width"), picture.get("height")
+            size = width * height if isinstance(width, int) and isinstance(height, int) else 0
+            logos.append((size, url))
+    return max(logos, key=lambda logo: logo[0])[1] if logos else None
+
+
 def _language(item: dict[str, Any]) -> str:
-    """Return the language code of a directory entry, lowercase, or empty when it is no code."""
-    language = _text(item.get("language")).lower()
+    """Return the language of a live station, lowercase, or empty when it has no code."""
+    # the station has no language of its own: its links and logos have one each
+    counts = Counter(
+        _text(entry.get("language")).lower()
+        for key in ("links", "multimedia")
+        for entry in _values(item.get(key))
+        if isinstance(entry, dict) and _text(entry.get("language"))
+    )
+    language = counts.most_common(1)[0][0] if counts else ""
     # it becomes a path segment, so anything else (fr-be, a slash) counts as no language
     return language if LANGUAGE_CODE.fullmatch(language) else ""
 
@@ -322,15 +372,14 @@ def _fold(name: str) -> str:
     return "".join(c for c in decomposed if not unicodedata.combining(c))
 
 
-def parse_service(service: Any) -> tuple[str, str | None, str | None] | None:
+def parse_service(service: Any) -> tuple[str, str | None, list[str]] | None:
     """
-    Return the name, logo and first stream of a station in the directory.
+    Return the name, logo and streams of a station in the old station directory.
 
-    None when the answer names no station or the station is deleted; the stream is None
-    when the station lists none. The streams are kept as given, with the parameters by which
-    the station counts its listeners.
+    The old directory is only asked for a station the live stations lack. None when the
+    answer names no station or the station is deleted. The streams are kept as given.
 
-    :param service: The answer of the directory for one station.
+    :param service: The answer of the old directory for one station.
     """
     if not isinstance(service, dict) or service.get("deleted") is True:
         return None
@@ -338,8 +387,8 @@ def parse_service(service: Any) -> tuple[str, str | None, str | None] | None:
     if not name:
         return None
     streams = [_text(s.get("url")) for s in _values(service.get("streams")) if isinstance(s, dict)]
-    stream = next((url for url in streams if _is_web_address(url)), None)
-    return name, _text(service.get("imageUrl")) or None, stream
+    urls = list(dict.fromkeys(url for url in streams if _is_web_address(url)))
+    return name, _text(service.get("imageUrl")) or None, urls
 
 
 def parse_now_playing(events: dict[str, Any], now: float) -> StreamMetadata | None:

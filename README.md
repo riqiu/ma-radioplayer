@@ -37,16 +37,15 @@ Under **Browse > Radioplayer > All stations**, every country Radioplayer serves 
 folder: the countries picked in the settings first, then the others by name. Inside a
 country the stations are listed by first letter (names that start with a digit or a symbol
 are under **#**), and play or can be added to the library like a station found by search.
-A country with stations in several languages, such as Belgium (Dutch, French) or
-Switzerland, has a folder per language first, the most used language on top. The lists
-come from the Radioplayer directory of each country, fetched when the country is first
-opened, and are kept for a day. That directory is Radioplayer's public list and may miss
-some stations, which a search still finds. A letter with more than 150 stations opens into folders by the first characters of the
+A country with stations in several languages, such as Belgium (Dutch, French), Finland
+(Finnish, Swedish) or Switzerland, has a folder per language first, the most used language
+on top. The lists are the live stations of each country in Radioplayer's web player
+([play.radioplayer.org](https://play.radioplayer.org)), fetched when the country is first
+opened, and are kept for a day; a station without a stream is left out, as it can't play.
+A letter with more than 150 stations opens into folders by the first characters of the
 name, longer until no folder has more than 150 stations; a folder that would have a single
 child skips ahead to where the names differ (for instance the Radio... stations of Germany
-under **R**). Many Belgian entries have no logo in the directory;
-the large logo shows once the station is played or added to the library, as Music Assistant
-then asks Radioplayer for the station itself.
+under **R**).
 
 ## Install
 
@@ -66,9 +65,11 @@ search of Music Assistant then finds the Radioplayer stations of those countries
 countries: Austria, Belgium, Canada, Denmark, Finland, France, Germany, Italy, Luxembourg,
 Norway, Spain, Switzerland and the United Kingdom.
 
-A station found by search plays the first stream that Radioplayer lists for it, asked again
-at every start. The address is used as given, with the parameters by which the station counts
-its listeners.
+A station found by search plays the stream with the highest bit rate that Radioplayer
+lists for it, asked again at every start. Radioplayer sometimes lists streams that are gone
+beside ones that work, so when a station has several the provider opens each in turn, reads
+only the answer's headers, and plays the first that answers. The address is used as given,
+with the parameters by which the station counts its listeners.
 
 ## Own stations
 
@@ -132,7 +133,9 @@ account, key or personal data: only the id of the station, or the text searched 
 
 A search asks each picked country once and keeps the answer for a day. Opening a song under
 Recently played searches your music providers for it, as the search of Music Assistant does.
-Starting a station found by search asks Radioplayer's station directory for its streams.
+Starting a station found by search asks Radioplayer's live stations for its streams. A
+station they no longer list, such as one added to the library earlier, is looked up in
+Radioplayer's older station directory instead.
 
 The provider tells Music Assistant to keep the title of the stream aside instead of showing
 it, and uses that title only while the feed fails.
@@ -140,11 +143,11 @@ it, and uses that title only while the feed fails.
 ## Limits
 
 - Only stations on Radioplayer, in a country where it runs, show what plays from the feed.
-- The feed, the search and the station directory are the public, unofficial API of the
-  Radioplayer web player. They need no key, but have no documentation or promise of
-  stability; this project is not affiliated with Radioplayer and may break when they change.
+- The feed, the search, the live stations and the station directory are the public,
+  unofficial API of the Radioplayer web player. They need no key, but have no documentation
+  or promise of stability; this project is not affiliated with Radioplayer and may break when they change.
   If the feed changes, the stations still play and show the title of the stream; if the
-  directory changes, only own stations play.
+  live stations change, only own stations play.
 - The feed and the audio are not in exact sync: a new song can show some seconds early or
   late.
 
